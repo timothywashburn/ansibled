@@ -49,7 +49,7 @@ func (rc *runCtxt) fetch() error {
 	if ref == "refs/heads/" || strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, " \t\n:") {
 		return stepErr("fetch", "invalid ref %q", ref)
 	}
-	fetchURL, header := rc.cfg.Forge.CloneURL, ""
+	fetchURL, header := rc.cfg.Git.CloneURL, ""
 	if fetchURL == "" {
 		fetchURL, header = rc.src.GitAuth()
 	}

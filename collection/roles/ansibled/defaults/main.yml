@@ -13,32 +13,35 @@ ansibled_gid: 10001
 
 # Required: the ansibled.yml settings (see DESIGN.md "Configuration"), without
 # the container paths (secret files, overlay_dir, data_dir, ansible.ssh_key_file),
-# which the role sets itself. Example:
+# which the role sets itself. Secrets are given inline instead of as *_file keys;
+# the role writes them to files and keeps them out of the rendered ansibled.yml.
+# Example:
 # ansibled_config:
 #   site: mysite
 #   public_url: http://10.0.0.1:8471
 #   listen: {webhook: "10.0.0.1:8470", web: "10.0.0.1:8471"}
-#   forge: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins}
+#   git:
+#     url: https://gitlab.example.org
+#     project: myorg/infra
+#     trusted_group: myorg/sysadmins
+#     token: glpat-...                # GitLab project access token (api, read_repository)
+#     # webhook_secret: ...           # optional, generated if not given
 #   web:
+#     # metrics_token: ...            # optional, generated if not given
+#     # session_key: ...              # optional, generated if not given
 #     oidc:
 #       issuer: https://auth.example.org/application/o/ansibled/
+#       client_id: ...
+#       client_secret: ...
 #       allowed_groups: [sysadmins]
 #   repo: {setup: uv sync --frozen --no-dev, venv_key_files: [pyproject.toml, uv.lock]}
 #   ansible: {inventory: inventories/mysite, playbooks: [site.yml], remote_user: ansibled}
 #   schedule: {nightly: "0 4 * * *", timezone: America/Los_Angeles}
-
-# Secrets needed on the first deploy only. When undefined on later runs, the
-# files already on the host are kept (keep them out of the repo ansibled checks,
-# e.g. pass them once with -e @secrets.yml from a gitignored file):
-# ansibled_forge_token:         GitLab project access token (api, read_repository)
-# ansibled_oidc_client_id:      OpenID Connect client id (web UI sign-in)
-# ansibled_oidc_client_secret:  OpenID Connect client secret
 #
-# Optional secrets. When undefined, a random 48-character value is generated the
-# first time and kept on the host afterwards:
-# ansibled_webhook_secret:
-# ansibled_metrics_token:
-# ansibled_session_key:
+# git.token, web.oidc.client_id and web.oidc.client_secret are needed on the
+# first deploy; when left out later, the files already on the host are kept.
+# git.webhook_secret, web.metrics_token and web.session_key are generated (48
+# random characters) the first time when not given, and kept afterwards.
 
 # Comment of the generated SSH key.
 ansibled_ssh_key_comment: "ansibled@{{ ansibled_config.site }}"
@@ -55,7 +58,7 @@ ansibled_overlay_prune: false
 # Maintainer role and api scope on the project.
 # ansibled_gitlab_hook_token:
 ansibled_gitlab_hook_url: "http://{{ ansibled_config.listen.webhook }}/webhook/gitlab"
-ansibled_gitlab_api_url: "{{ ansibled_config.forge.url }}"
+ansibled_gitlab_api_url: "{{ ansibled_config.git.url }}"
 # Verify TLS when talking to the GitLab API.
 ansibled_gitlab_validate_certs: true
 # Let GitLab verify the TLS certificate of the hook URL (only matters for https).

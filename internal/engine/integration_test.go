@@ -165,7 +165,7 @@ func TestIntegration(t *testing.T) {
 	cfg := &config.Config{
 		Site:    "it",
 		DataDir: filepath.Join(base, "data"),
-		Forge:   config.Forge{CloneURL: bare},
+		Git:     config.Git{CloneURL: bare},
 		Repo: config.Repo{
 			Workdir:                 ".",
 			Setup:                   "uv sync --frozen --no-dev",

@@ -171,7 +171,7 @@ func newHarness(t *testing.T, extra map[string]string, mut func(*config.Config))
 	t.Helper()
 	repo, sha := fakeRepo(t, extra)
 	cfg := testConfig(t.TempDir())
-	cfg.Forge.CloneURL = repo
+	cfg.Git.CloneURL = repo
 	if mut != nil {
 		mut(cfg)
 	}
@@ -498,7 +498,7 @@ func TestNewValidates(t *testing.T) {
 	}
 	t.Setenv(CallbackDirEnv, "/from/env")
 	cfg := testConfig(t.TempDir())
-	cfg.Forge.CloneURL = "/x"
+	cfg.Git.CloneURL = "/x"
 	e, err := New(Options{Config: cfg})
 	if err != nil {
 		t.Fatal(err)

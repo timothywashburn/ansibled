@@ -8,11 +8,11 @@ listen:
   webhook: 10.0.0.1:8470
   web: 10.0.0.1:8471
 
-forge:
+git:
   type: gitlab
   url: https://gitlab.example.org
   project: myorg/infra
-  token_file: /etc/ansibled/secrets/forge_token
+  token_file: /etc/ansibled/secrets/git_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
   trusted_group: myorg/sysadmins   # who may trigger runs
 

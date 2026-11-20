@@ -24,7 +24,7 @@ type Config struct {
 	Site       string   `yaml:"site"`
 	PublicURL  string   `yaml:"public_url"`
 	Listen     Listen   `yaml:"listen"`
-	Forge      Forge    `yaml:"forge"`
+	Git        Git      `yaml:"git"`
 	Repo       Repo     `yaml:"repo"`
 	Ansible    Ansible  `yaml:"ansible"`
 	OverlayDir string   `yaml:"overlay_dir"`
@@ -42,7 +42,7 @@ type Listen struct {
 	Web     string `yaml:"web"`
 }
 
-type Forge struct {
+type Git struct {
 	Type              string `yaml:"type"`
 	URL               string `yaml:"url"`
 	Project           string `yaml:"project"`
@@ -147,8 +147,8 @@ func Parse(b []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if c.Forge.Type == "" {
-		c.Forge.Type = "gitlab"
+	if c.Git.Type == "" {
+		c.Git.Type = "gitlab"
 	}
 	if c.Repo.Workdir == "" {
 		c.Repo.Workdir = "."
@@ -172,7 +172,7 @@ func (c *Config) applyDefaults() {
 		c.Web.OIDC.Scopes = DefaultScopes()
 	}
 	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
-	c.Forge.URL = strings.TrimRight(c.Forge.URL, "/")
+	c.Git.URL = strings.TrimRight(c.Git.URL, "/")
 }
 
 // Validate checks everything that can be checked without touching the network
@@ -193,23 +193,23 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	switch c.Forge.Type {
+	switch c.Git.Type {
 	case "gitlab":
 	default:
-		add("forge.type: %q is not supported (gitlab)", c.Forge.Type)
+		add("git.type: %q is not supported (gitlab)", c.Git.Type)
 	}
-	if u, err := url.Parse(c.Forge.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		add("forge.url: must be an absolute http(s) URL")
+	if u, err := url.Parse(c.Git.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		add("git.url: must be an absolute http(s) URL")
 	}
-	if c.Forge.Project == "" {
-		add("forge.project: required")
+	if c.Git.Project == "" {
+		add("git.project: required")
 	}
-	if c.Forge.TrustedGroup == "" {
-		add("forge.trusted_group: required")
+	if c.Git.TrustedGroup == "" {
+		add("git.trusted_group: required")
 	}
 	req := map[string]string{
-		"forge.token_file":            c.Forge.TokenFile,
-		"forge.webhook_secret_file":   c.Forge.WebhookSecretFile,
+		"git.token_file":              c.Git.TokenFile,
+		"git.webhook_secret_file":     c.Git.WebhookSecretFile,
 		"ansible.ssh_key_file":        c.Ansible.SSHKeyFile,
 		"web.metrics_token_file":      c.Web.MetricsTokenFile,
 		"web.oidc.client_id_file":     c.Web.OIDC.ClientIDFile,

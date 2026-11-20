@@ -66,7 +66,7 @@ func main() {
 		_ = fs.Parse(args)
 		err = serve(*configPath, log)
 	case "check-config":
-		online := fs.Bool("online", false, "also check the forge token, project and trusted group, and OIDC discovery")
+		online := fs.Bool("online", false, "also check the git token, project and trusted group, and OIDC discovery")
 		_ = fs.Parse(args)
 		err = checkConfig(*configPath, *online)
 	case "run-once":
@@ -109,8 +109,8 @@ func readSecrets(c *config.Config) (secrets, error) {
 		}
 		*dst = v
 	}
-	read(c.Forge.TokenFile, &s.forgeToken)
-	read(c.Forge.WebhookSecretFile, &s.webhookSecret)
+	read(c.Git.TokenFile, &s.forgeToken)
+	read(c.Git.WebhookSecretFile, &s.webhookSecret)
 	read(c.Web.OIDC.ClientIDFile, &s.oidcID)
 	read(c.Web.OIDC.ClientSecretFile, &s.oidcSecret)
 	read(c.Web.MetricsTokenFile, &s.metricsToken)
@@ -131,12 +131,12 @@ func readSecrets(c *config.Config) (secrets, error) {
 
 func newForge(c *config.Config, s secrets, log *slog.Logger) (*gitlab.Client, error) {
 	return gitlab.New(gitlab.Options{
-		BaseURL:       c.Forge.URL,
-		Project:       c.Forge.Project,
+		BaseURL:       c.Git.URL,
+		Project:       c.Git.Project,
 		Token:         s.forgeToken,
 		WebhookSecret: s.webhookSecret,
-		TrustedGroup:  c.Forge.TrustedGroup,
-		CloneURL:      c.Forge.CloneURL,
+		TrustedGroup:  c.Git.TrustedGroup,
+		CloneURL:      c.Git.CloneURL,
 		Logger:        log.With("component", "gitlab"),
 	})
 }
@@ -260,9 +260,9 @@ func checkConfig(path string, online bool) error {
 	}
 	var failed []error
 	if errs := f.Check(context.Background()); len(errs) > 0 {
-		failed = append(failed, fmt.Errorf("forge check failed:\n  %w", errors.Join(errs...)))
+		failed = append(failed, fmt.Errorf("git check failed:\n  %w", errors.Join(errs...)))
 	} else {
-		fmt.Println("forge token, project and trusted group: ok")
+		fmt.Println("git token, project and trusted group: ok")
 	}
 	if err := signIn.Check(context.Background()); err != nil {
 		failed = append(failed, fmt.Errorf("OIDC check failed:\n  %w", err))
@@ -283,15 +283,15 @@ func runOnce(path, branch, sha string, mr int, log *slog.Logger) error {
 		return err
 	}
 	// The token is only optional when nothing needs the API or authenticated git.
-	token, tokErr := config.ReadSecret(cfg.Forge.TokenFile)
-	if needAPI := mr != 0 || sha == "" || cfg.Forge.CloneURL == ""; needAPI && tokErr != nil {
+	token, tokErr := config.ReadSecret(cfg.Git.TokenFile)
+	if needAPI := mr != 0 || sha == "" || cfg.Git.CloneURL == ""; needAPI && tokErr != nil {
 		return tokErr
 	}
 	f, err := gitlab.New(gitlab.Options{
-		BaseURL: cfg.Forge.URL, Project: cfg.Forge.Project, Token: token,
+		BaseURL: cfg.Git.URL, Project: cfg.Git.Project, Token: token,
 		// run-once never receives webhooks or signs anyone in.
 		WebhookSecret: "unused-by-run-once",
-		TrustedGroup:  cfg.Forge.TrustedGroup, CloneURL: cfg.Forge.CloneURL,
+		TrustedGroup:  cfg.Git.TrustedGroup, CloneURL: cfg.Git.CloneURL,
 		Logger: log.With("component", "gitlab"),
 	})
 	if err != nil {

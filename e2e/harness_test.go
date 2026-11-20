@@ -103,7 +103,7 @@ func freePort(t *testing.T) int {
 // ---- git ----
 
 // gitRepo is a work tree whose commits are pushed into a bare repo that the
-// ansibled container fetches from (forge.clone_url).
+// ansibled container fetches from (git.clone_url).
 type gitRepo struct {
 	t    *testing.T
 	work string

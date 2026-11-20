@@ -143,7 +143,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 		Config: &config.Config{
 			Site: "lab", PublicURL: "http://ansibled.example:8471",
 			Listen:   config.Listen{Webhook: "127.0.0.1:0", Web: "127.0.0.1:0"},
-			Forge:    config.Forge{TrustedGroup: "example/admins"},
+			Git:      config.Git{TrustedGroup: "example/admins"},
 			Schedule: config.Schedule{Timezone: "UTC"},
 			Web:      config.Web{OIDC: config.OIDC{AllowedGroups: []string{"sysadmins", "ops"}}},
 		},

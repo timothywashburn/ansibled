@@ -47,16 +47,15 @@ group** (a GitLab group, e.g. `myorg/sysadmins`) has vouched for:
 
 Everything else is ignored and counted in `ansibled_webhooks_total{accepted="false"}`.
 
-ansibled's own bot user (the forge token's user) is **never** trusted, even if it
+ansibled's own bot user (the git token's user) is **never** trusted, even if it
 is a member of the group: the token can push commits, so trusting it would turn
 a leaked token into root on the site.
 
 The rule rests on the webhook being authentic: the pusher and comment author come
 from the webhook body, and only the webhook secret proves GitLab sent it.
-**Anyone who can read the webhook secret can get any commit run.** Keep it, and
-the forge token, out of the repository being checked (even a private one), and
-only on the ansibled host. The deploy role generates the webhook secret on the
-host for this reason.
+**Anyone who can read the webhook secret can get any commit run.** Keep it out of
+the repository being checked (even a private one) and only on the ansibled
+host. The deploy role generates the webhook secret on the host for this reason.
 
 The log page and `/metrics` always require authentication (see [Web UI](#web-ui-and-auth)).
 
@@ -409,11 +408,11 @@ listen:
   webhook: 10.0.0.1:8470
   web: 10.0.0.1:8471
 
-forge:
+git:
   type: gitlab
   url: https://git.example.org
   project: myorg/infra              # path or numeric id
-  token_file: /etc/ansibled/secrets/forge_token
+  token_file: /etc/ansibled/secrets/git_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
   trusted_group: myorg/sysadmins     # who may trigger runs
 
@@ -457,7 +456,7 @@ web:
 
 - `ansibled serve [-config path]`: the daemon (default command).
 - `ansibled check-config [-config path] [--online]`: validate the config and read
-  every secret file (including the SSH key); `--online` also checks the forge
+  every secret file (including the SSH key); `--online` also checks the git
   token, project and trusted-group visibility, and runs OIDC discovery.
 - `ansibled run-once [-config path] --sha <sha>|--branch <b>`: run the engine
   once in the foreground, print the summary, write nothing to the forge.
@@ -521,11 +520,12 @@ collections:
 - Generates an ed25519 SSH key pair in `secrets/` if missing and sets the fact
   `ansibled_public_key` for `ansibled_target`.
 - Renders `ansibled.yml` from `ansibled_config` (a dict merged over defaults).
-- Writes secrets from variables (`ansibled_forge_token`, `ansibled_webhook_secret`,
-  `ansibled_oidc_client_id`, `ansibled_oidc_client_secret`,
-  `ansibled_metrics_token`, `ansibled_session_key`), generating the webhook
-  secret, metrics token and session key if not given. The forge token and OIDC
-  client credentials are needed on the first deploy only.
+- Writes the secrets given inline in `ansibled_config` (`git.token`,
+  `git.webhook_secret`, `web.oidc.client_id`, `web.oidc.client_secret`,
+  `web.metrics_token`, `web.session_key`) to files and leaves them out of the
+  rendered `ansibled.yml`, generating the webhook secret, metrics token and
+  session key if not given. The token and OIDC client credentials are needed on
+  the first deploy only.
 - Writes `ansibled_overlay_files` (list of `{path, content | src, mode}`).
 - Renders `compose.yml` (host networking, `restart: always`, `:Z` volume labels
   for SELinux) and brings it up with `community.docker.docker_compose_v2`.

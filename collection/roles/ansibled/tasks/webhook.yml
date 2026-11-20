@@ -6,7 +6,7 @@
   ansible.builtin.uri:
     url: >-
       {{ ansibled_gitlab_api_url | regex_replace('/+$', '') }}/api/v4/projects/{{
-         ansibled_config.forge.project | string | urlencode | replace('/', '%2F') }}/hooks?per_page=100
+         ansibled_config.git.project | string | urlencode | replace('/', '%2F') }}/hooks?per_page=100
     headers:
       PRIVATE-TOKEN: "{{ ansibled_gitlab_hook_token }}"
     validate_certs: "{{ ansibled_gitlab_validate_certs }}"
@@ -30,7 +30,7 @@
     api_url: "{{ ansibled_gitlab_api_url }}"
     api_token: "{{ ansibled_gitlab_hook_token }}"
     validate_certs: "{{ ansibled_gitlab_validate_certs }}"
-    project: "{{ ansibled_config.forge.project | string }}"
+    project: "{{ ansibled_config.git.project | string }}"
     hook_url: "{{ ansibled_gitlab_hook_url }}"
     push_events: true
     merge_requests_events: true

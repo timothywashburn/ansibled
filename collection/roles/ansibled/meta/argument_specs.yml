@@ -40,6 +40,8 @@ argument_specs:
         description:
           - The ansibled.yml settings. Container-side paths (secret files, C(overlay_dir),
             C(data_dir), C(ansible.ssh_key_file)) are set by the role and must not be given.
+          - Secrets are given inline (C(git.token), C(web.oidc.client_id), ...). The role
+            writes them to files and leaves them out of the rendered ansibled.yml.
         options:
           site:
             type: str
@@ -61,14 +63,14 @@ argument_specs:
                 type: str
                 required: true
                 description: host:port of the web UI and metrics listener.
-          forge:
+          git:
             type: dict
             required: true
             options:
               type:
                 type: str
                 choices: [gitlab]
-                description: Forge type.
+                description: Git hosting type.
               url:
                 type: str
                 required: true
@@ -84,6 +86,16 @@ argument_specs:
               clone_url:
                 type: str
                 description: Override for the git fetch URL (mirrors, tests).
+              token:
+                type: str
+                no_log: true
+                description:
+                  - GitLab project access token (Developer, scopes api and read_repository).
+                  - Required on the first deploy. When left out later, the file already on the host is kept.
+              webhook_secret:
+                type: str
+                no_log: true
+                description: Webhook secret token. Generated once and kept on the host if not given.
           repo:
             type: dict
             required: true
@@ -148,6 +160,14 @@ argument_specs:
               - Web UI settings. C(metrics_token_file), C(session_key_file) and the OIDC
                 client id/secret files are set by the role.
             options:
+              metrics_token:
+                type: str
+                no_log: true
+                description: Bearer token for C(/metrics). Generated once and kept on the host if not given.
+              session_key:
+                type: str
+                no_log: true
+                description: Web session signing key. Generated once and kept on the host if not given.
               oidc:
                 type: dict
                 required: true
@@ -157,6 +177,18 @@ argument_specs:
                     type: str
                     required: true
                     description: Issuer URL, e.g. C(https://auth.example.org/application/o/ansibled/).
+                  client_id:
+                    type: str
+                    no_log: true
+                    description:
+                      - OpenID Connect client id.
+                      - Required on the first deploy. When left out later, the file already on the host is kept.
+                  client_secret:
+                    type: str
+                    no_log: true
+                    description:
+                      - OpenID Connect client secret.
+                      - Required on the first deploy. When left out later, the file already on the host is kept.
                   allowed_groups:
                     type: list
                     elements: str
@@ -170,36 +202,6 @@ argument_specs:
                     elements: str
                     description: Scopes to request (ansibled default C([openid, profile, email])); must include C(openid).
 
-      ansibled_forge_token:
-        type: str
-        no_log: true
-        description:
-          - GitLab project access token (Developer, scopes api and read_repository).
-          - Required on the first deploy. When undefined later, the file already on the host is kept.
-      ansibled_oidc_client_id:
-        type: str
-        no_log: true
-        description:
-          - OpenID Connect client id (web UI sign-in).
-          - Required on the first deploy. When undefined later, the file already on the host is kept.
-      ansibled_oidc_client_secret:
-        type: str
-        no_log: true
-        description:
-          - OpenID Connect client secret.
-          - Required on the first deploy. When undefined later, the file already on the host is kept.
-      ansibled_webhook_secret:
-        type: str
-        no_log: true
-        description: Webhook secret token. Generated once and kept on the host if undefined.
-      ansibled_metrics_token:
-        type: str
-        no_log: true
-        description: Bearer token for C(/metrics). Generated once and kept on the host if undefined.
-      ansibled_session_key:
-        type: str
-        no_log: true
-        description: Web session signing key. Generated once and kept on the host if undefined.
       ansibled_ssh_key_comment:
         type: str
         default: ansibled@<site>
@@ -242,7 +244,7 @@ argument_specs:
         description: URL GitLab sends webhooks to.
       ansibled_gitlab_api_url:
         type: str
-        default: <forge.url>
+        default: <git.url>
         description: GitLab base URL for the API.
       ansibled_gitlab_validate_certs:
         type: bool

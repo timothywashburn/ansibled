@@ -44,7 +44,7 @@ type Source interface {
 type Options struct {
 	Config *config.Config
 	// Source supplies fetch URL, credentials and MR refs. It may be nil only
-	// when Config.Forge.CloneURL is set.
+	// when Config.Git.CloneURL is set.
 	Source Source
 	// CallbackDir holds ansibled_events.py. Default: $ANSIBLED_CALLBACK_DIR,
 	// else DefaultCallbackDir.
@@ -77,8 +77,8 @@ func New(o Options) (*Engine, error) {
 	if o.Config == nil {
 		return nil, errors.New("engine: Config is required")
 	}
-	if o.Source == nil && o.Config.Forge.CloneURL == "" {
-		return nil, errors.New("engine: Source is required unless forge.clone_url is set")
+	if o.Source == nil && o.Config.Git.CloneURL == "" {
+		return nil, errors.New("engine: Source is required unless git.clone_url is set")
 	}
 	if !filepath.IsAbs(o.Config.DataDir) {
 		return nil, fmt.Errorf("engine: data_dir %q must be absolute", o.Config.DataDir)

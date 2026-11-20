@@ -42,13 +42,16 @@ This also installs the dependencies `community.docker`, `community.general`,
           site: mysite
           public_url: http://10.0.0.1:8471
           listen: {webhook: "10.0.0.1:8470", web: "10.0.0.1:8471"}
-          forge: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins}
+          git: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins, token: "{{ vault_git_token }}"}
           repo: {setup: uv sync --frozen --no-dev, venv_key_files: [pyproject.toml, uv.lock]}
           ansible: {inventory: inventories/mysite, playbooks: [site.yml], remote_user: ansibled}
           # Web UI sign-in: any OpenID Connect provider; access by its groups claim.
-          web: {oidc: {issuer: "https://auth.example.org/application/o/ansibled/", allowed_groups: [sysadmins]}}
-        # Secrets (forge token, OIDC client id/secret) on the first deploy only, from a gitignored file:
-        #   ansible-playbook site.yml -e @ansibled-secrets.yml
+          web:
+            oidc:
+              issuer: https://auth.example.org/application/o/ansibled/
+              client_id: "{{ vault_oidc_client_id }}"
+              client_secret: "{{ vault_oidc_client_secret }}"
+              allowed_groups: [sysadmins]
 
 - name: Hosts ansibled manages
   hosts: all
@@ -60,8 +63,8 @@ This also installs the dependencies `community.docker`, `community.general`,
         ansibled_target_from: [10.0.0.1]
 ```
 
-See the role READMEs for every variable, and why the secrets must not be
-committed to the repo ansibled checks.
+See the role READMEs for every variable, and which secrets are generated on
+the host when not given.
 
 ## Tests
 

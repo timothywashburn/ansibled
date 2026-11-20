@@ -197,7 +197,7 @@ func (s *suite) setup() {
 	s.cfgDir = filepath.Join(base, "etc")
 	sec := filepath.Join(s.cfgDir, "secrets")
 	for name, v := range map[string]string{
-		"forge_token": gitlabtest.Token, "webhook_secret": webhookSecret,
+		"git_token": gitlabtest.Token, "webhook_secret": webhookSecret,
 		"oidc_client_id": oidctest.ClientID, "oidc_client_secret": oidctest.ClientSecret,
 		"metrics_token": metricsToken, "session_key": sessionKey,
 	} {
@@ -242,11 +242,11 @@ public_url: %s
 listen:
   webhook: 0.0.0.0:8470
   web: 0.0.0.0:8471
-forge:
+git:
   type: gitlab
   url: %s
   project: %s
-  token_file: /etc/ansibled/secrets/forge_token
+  token_file: /etc/ansibled/secrets/git_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
   trusted_group: %s
   clone_url: %s

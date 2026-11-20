@@ -1,6 +1,6 @@
 # Deploys the ansibled role into the docker:dind container.
-# Secrets: pass -e @secrets.yml on the first deploy only (like a real deployment
-# would from a gitignored file); later runs must work without them.
+# Secrets: pass -e @secrets.yml (test_secrets, merged into ansibled_config) on the
+# first deploy only; later runs must work without them.
 # Extra vars:
 #   test_image        image to run (default ghcr.io/timothywashburn/ansibled:latest)
 #   test_pull         ansibled_pull (default never: the image is loaded by run.sh)
@@ -23,13 +23,14 @@
       vars:
         ansibled_image: "{{ test_image | default('ghcr.io/timothywashburn/ansibled:latest') }}"
         ansibled_pull: "{{ test_pull | default('never') }}"
-        ansibled_config:
+        ansibled_config: "{{ _test_config | combine(test_secrets | default({}), recursive=True) }}"
+        _test_config:
           site: testsite
           public_url: http://127.0.0.1:8471
           listen:
             webhook: 127.0.0.1:8470
             web: 127.0.0.1:8471
-          forge:
+          git:
             url: https://gitlab.example.org
             project: myorg/infra
             trusted_group: myorg/sysadmins

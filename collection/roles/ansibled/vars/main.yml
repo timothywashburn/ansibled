@@ -15,8 +15,8 @@ _ansibled_h_data: "{{ ansibled_dir }}/data"
 
 # Merged over ansibled_config, so users never write these.
 _ansibled_config_managed:
-  forge:
-    token_file: "{{ _ansibled_c_secrets }}/forge_token"
+  git:
+    token_file: "{{ _ansibled_c_secrets }}/git_token"
     webhook_secret_file: "{{ _ansibled_c_secrets }}/webhook_secret"
   ansible:
     ssh_key_file: "{{ _ansibled_c_secrets }}/ssh_key"
@@ -29,28 +29,48 @@ _ansibled_config_managed:
       client_id_file: "{{ _ansibled_c_secrets }}/oidc_client_id"
       client_secret_file: "{{ _ansibled_c_secrets }}/oidc_client_secret"
 
-_ansibled_config_effective: "{{ ansibled_config | combine(_ansibled_config_managed, recursive=True) }}"
+# Secret values given inline in ansibled_config. The role writes them to files
+# under secrets/ and leaves them out of the rendered ansibled.yml.
+_ansibled_secret_values:
+  git_token: "{{ ansibled_config.git.token | default('') | string }}"
+  webhook_secret: "{{ ansibled_config.git.webhook_secret | default('') | string }}"
+  metrics_token: "{{ ansibled_config.web.metrics_token | default('') | string }}"
+  session_key: "{{ ansibled_config.web.session_key | default('') | string }}"
+  oidc_client_id: "{{ ansibled_config.web.oidc.client_id | default('') | string }}"
+  oidc_client_secret: "{{ ansibled_config.web.oidc.client_secret | default('') | string }}"
+
+_ansibled_config_secret_free: >-
+  {{ ansibled_config | combine({
+       'git': ansibled_config.git | default({}) | dict2items
+              | rejectattr('key', 'in', ['token', 'webhook_secret']) | items2dict,
+       'web': ansibled_config.web | default({}) | dict2items
+              | rejectattr('key', 'in', ['metrics_token', 'session_key', 'oidc']) | items2dict
+              | combine({'oidc': ansibled_config.web.oidc | default({}) | dict2items
+                                 | rejectattr('key', 'in', ['client_id', 'client_secret']) | items2dict}),
+     }) }}
+_ansibled_config_effective: "{{ _ansibled_config_secret_free | combine(_ansibled_config_managed, recursive=True) }}"
 
 # Keys ansibled.yml accepts, per section (unknown keys are an error in ansibled).
 _ansibled_config_keys:
-  top: [site, public_url, listen, forge, repo, ansible, schedule, retention, web]
+  top: [site, public_url, listen, git, repo, ansible, schedule, retention, web]
   listen: [webhook, web]
-  forge: [type, url, project, trusted_group, clone_url]
+  git: [type, url, project, trusted_group, clone_url, token, webhook_secret]
   repo: [workdir, setup, venv_key_files, collections_requirements]
   ansible: [inventory, playbooks, extra_args, remote_user, timeout, env]
   schedule: [nightly, timezone]
-  web: [oidc]
-  web.oidc: [issuer, allowed_groups, groups_claim, scopes]
+  web: [oidc, metrics_token, session_key]
+  web.oidc: [issuer, allowed_groups, groups_claim, scopes, client_id, client_secret]
 
-# Secret files written from variables: name -> variable value (undefined = generate).
+# Secret files and the ansibled_config key each one comes from. Required ones
+# must be given on the first deploy; optional ones are generated when not given.
 _ansibled_required_secrets:
-  - {name: forge_token, var: ansibled_forge_token}
-  - {name: oidc_client_id, var: ansibled_oidc_client_id}
-  - {name: oidc_client_secret, var: ansibled_oidc_client_secret}
+  - {name: git_token, key: git.token}
+  - {name: oidc_client_id, key: web.oidc.client_id}
+  - {name: oidc_client_secret, key: web.oidc.client_secret}
 _ansibled_optional_secrets:
-  - {name: webhook_secret, var: ansibled_webhook_secret}
-  - {name: metrics_token, var: ansibled_metrics_token}
-  - {name: session_key, var: ansibled_session_key}
+  - {name: webhook_secret, key: git.webhook_secret}
+  - {name: metrics_token, key: web.metrics_token}
+  - {name: session_key, key: web.session_key}
 
 # host:port -> (host for the healthcheck, port). Wildcard binds are probed on loopback.
 _ansibled_webhook_host: "{{ ansibled_config.listen.webhook | regex_replace(':[0-9]+$', '') }}"
@@ -93,7 +113,7 @@ _ansibled_unknown_keys_json: >-
   {%- for k in ansibled_config if k not in _ansibled_config_keys.top -%}
   {%-   set ns.out = ns.out + [k] -%}
   {%- endfor -%}
-  {%- for section in ['listen', 'forge', 'repo', 'ansible', 'schedule', 'web'] -%}
+  {%- for section in ['listen', 'git', 'repo', 'ansible', 'schedule', 'web'] -%}
   {%-   if ansibled_config[section] is defined and ansibled_config[section] is mapping -%}
   {%-     for k in ansibled_config[section] if k not in _ansibled_config_keys[section] -%}
   {%-       set ns.out = ns.out + [section ~ '.' ~ k] -%}

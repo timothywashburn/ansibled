@@ -208,7 +208,7 @@ want='755 0:0 .
 600 10001:10001 ./etc/overlay/ansible/group_vars/all/secret.yml
 644 10001:10001 ./etc/overlay/top.txt
 700 10001:10001 ./etc/secrets
-400 10001:10001 ./etc/secrets/forge_token
+400 10001:10001 ./etc/secrets/git_token
 400 10001:10001 ./etc/secrets/metrics_token
 400 10001:10001 ./etc/secrets/oidc_client_id
 400 10001:10001 ./etc/secrets/oidc_client_secret
@@ -241,29 +241,29 @@ assert_ok "overlay set b with prune"
 [ "$started" = "$(started_at)" ] || fail "overlay change restarted the container"
 pass "overlay pruned (no restart needed: ansibled copies it per run)"
 
-play "${DAEMON[@]}" -e test_overlay_set=b -e ansibled_forge_token=glpat-rotated-not-real
-assert_ok "rotate the forge token"
+play "${DAEMON[@]}" -e test_overlay_set=b -e '{"test_secrets":{"git":{"token":"glpat-rotated-not-real"}}}'
+assert_ok "rotate the git token"
 grep -q 'RUNNING HANDLER.*Restart ansibled' "$WORK/last.log" || fail "restart handler did not run"
 [ "$started" != "$(started_at)" ] || fail "container was not restarted"
 pass "secret change restarts the container"
 
 play "${DAEMON[@]}" -e ansibled_dir=/opt/fresh
-assert_failed_with "fresh host without secrets fails" "ansibled_forge_token is undefined"
+assert_failed_with "fresh host without secrets fails" "ansibled_config.git.token is not set"
 dind 'test ! -e /opt/fresh' || fail "fresh host was modified before the secret check"
 play "${DAEMON[@]}" -e ansibled_dir=/opt/fresh --check
 assert_ok "fresh host without secrets, check mode"
-grep -q "WARNING: ansibled_forge_token is undefined" "$WORK/last.log" || fail "no check-mode warning"
+grep -q "WARNING: ansibled_config.git.token is not set" "$WORK/last.log" || fail "no check-mode warning"
 pass "check mode only warns about the missing secrets"
 
 CFG_BASE='"site":"x","public_url":"http://a:1","listen":{"webhook":"a:1","web":"a:2"},"repo":{"setup":"s","venv_key_files":["a"]},"ansible":{"inventory":"i","playbooks":["p"]}'
 OIDC_OK='"oidc":{"issuer":"https://auth.example.org/","allowed_groups":["sysadmins"]}'
-play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\",\"token_file\":\"/x\"},\"web\":{$OIDC_OK}}}"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"git\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\",\"token_file\":\"/x\"},\"web\":{$OIDC_OK}}}"
 assert_failed_with "role-managed key in ansibled_config is rejected" "token_file"
-play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"client_secret_file\":\"/x\"}}}}"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"git\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"client_secret_file\":\"/x\"}}}}"
 assert_failed_with "role-managed web.oidc key is rejected" "client_secret_file"
-play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"}}}"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"git\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"}}}"
 assert_failed_with "missing web.oidc is rejected" "missing required arguments: web"
-play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"scopes\":[\"profile\"]}}}}"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"git\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"scopes\":[\"profile\"]}}}}"
 assert_failed_with "web.oidc.scopes without openid is rejected" "must include openid"
 play "${DAEMON[@]}" --check -e '{"ansibled_overlay_files":[{"path":"ansible/../../x","content":"do-not-print-me"}]}'
 assert_failed_with "overlay path escaping the repo is rejected" "stays inside the repo"
@@ -294,7 +294,7 @@ assert not c["tag_push_events"] and not c["issues_events"], c
 print(c["token"])' >"$WORK/hook_token" || fail "hook payload"
 [ "$(cat "$WORK/hook_token")" = "$(dind 'cat /opt/ansibled/etc/secrets/webhook_secret')" ] || fail "hook token != webhook secret"
 pass "hook has push/MR/note events and the effective webhook secret"
-play "${DAEMON[@]}" "${HOOK[@]}" -e ansibled_webhook_secret=rotated-webhook-secret-not-real
+play "${DAEMON[@]}" "${HOOK[@]}" -e '{"test_secrets":{"git":{"webhook_secret":"rotated-webhook-secret-not-real"}}}'
 assert_ok "rotate the webhook secret"
 curl -s http://127.0.0.1:$FG_PORT/_log | grep -q rotated-webhook-secret-not-real || fail "rotated secret not sent to GitLab"
 pass "rotated webhook secret is pushed to the hook"
