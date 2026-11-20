@@ -1,11 +1,4 @@
 ---
-# Only the minimal fact subset is needed (os_family, selinux). Skipped when the
-# play already gathered facts.
-- name: Gather minimal facts
-  ansible.builtin.setup:
-    gather_subset: ["!all"]
-  when: ansible_facts.os_family is not defined or ansible_facts.selinux is not defined
-
 - name: Set up the ansibled account
   ansible.builtin.import_tasks: present.yml
   when: ansibled_target_state == 'present'

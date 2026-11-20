@@ -6,7 +6,7 @@ argument_specs:
       - Creates a local system user with an SSH key and passwordless sudo,
         so ansibled can run C(ansible-playbook --check) against the host.
       - With O(ansibled_target_state=absent), removes the user, its home,
-        the sudoers file and the SELinux file context again.
+        and the sudoers file again.
     options:
       ansibled_target_state:
         type: str
@@ -20,12 +20,13 @@ argument_specs:
       ansibled_target_home:
         type: path
         default: /var/lib/ansibled
-        description: Home directory of the user (created with mode 0700).
-      ansibled_target_public_key:
-        type: raw
         description:
-          - Public key(s) allowed to log in, as a string (one key per line) or a list of strings.
-          - Required when O(ansibled_target_state=present).
+          - Home directory of the user (created with mode 0700).
+          - On SELinux hosts it must be somewhere the policy labels C(<home>/.ssh) as C(ssh_home_t), such as C(/var/lib/<name>).
+      ansibled_target_public_key:
+        type: str
+        description:
+          - The ansibled daemon's SSH public key. Required when O(ansibled_target_state=present).
           - C(authorized_keys) is managed exclusively, other keys are removed.
       ansibled_target_from:
         type: list
@@ -34,7 +35,3 @@ argument_specs:
         description:
           - Source addresses, CIDRs or host patterns the key may be used from.
           - When not empty, every key gets the C(from="...") option.
-      ansibled_target_manage_selinux:
-        type: bool
-        default: true
-        description: On hosts with SELinux enabled, label C(<home>/.ssh) as C(ssh_home_t).

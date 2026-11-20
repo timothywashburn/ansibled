@@ -20,12 +20,3 @@
   ansible.builtin.file:
     path: "{{ ansibled_target_home }}"
     state: absent
-
-- name: Remove the ssh_home_t file context (SELinux)
-  community.general.sefcontext:
-    target: "{{ ansibled_target_home }}/.ssh(/.*)?"
-    setype: ssh_home_t
-    state: absent
-  when:
-    - ansibled_target_manage_selinux | bool
-    - (ansible_facts.selinux.status | default('disabled')) == 'enabled'
