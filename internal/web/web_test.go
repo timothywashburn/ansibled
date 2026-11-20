@@ -539,8 +539,8 @@ func TestRunPage(t *testing.T) {
 	evil := "<script>alert(1)</script>"
 	r := mkRun(5, model.StateFailed)
 	r.Summary = &model.Summary{Playbooks: []model.PlaybookResult{{Playbook: "site.yml", ExitCode: 2, Hosts: []model.HostResult{
-		{Host: "fiona", OK: 4, Changed: 1, ChangedTasks: []string{evil}},
-		{Host: "khai", Failed: 1, FailedTasks: []string{"broken task"}},
+		{Host: "web1", OK: 4, Changed: 1, ChangedTasks: []string{evil}},
+		{Host: "db1", Failed: 1, FailedTasks: []string{"broken task"}},
 	}}}}
 	q := mkRun(6, model.StateQueued)
 	x := mkRun(7, model.StateSuccess)
@@ -565,7 +565,7 @@ func TestRunPage(t *testing.T) {
 	if strings.Contains(body, "<b>bold</b>") || !strings.Contains(body, "&lt;b&gt;bold&lt;/b&gt;") {
 		t.Errorf("log not escaped")
 	}
-	for _, s := range []string{"site.yml", "fiona", "khai", "broken task", `/runs/5/log.txt`} {
+	for _, s := range []string{"site.yml", "web1", "db1", "broken task", `/runs/5/log.txt`} {
 		if !strings.Contains(body, s) {
 			t.Errorf("missing %q", s)
 		}

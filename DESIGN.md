@@ -189,8 +189,8 @@ default stdout stays the human-readable log. It writes one JSON object per line:
 ```json
 {"event":"play_start","playbook":"site.yml","play":"compute + login nodes"}
 {"event":"task_start","play":"...","task":"docker : podman restart service","path":"roles/docker/tasks/main.yml:51"}
-{"event":"result","status":"ok|changed|failed|unreachable|skipped","host":"fiona","task":"...","action":"ansible.builtin.copy","ignore_errors":false,"msg":"..."}
-{"event":"stats","hosts":{"fiona":{"ok":30,"changed":3,"failures":0,"unreachable":0,"skipped":4,"rescued":0,"ignored":0}}}
+{"event":"result","status":"ok|changed|failed|unreachable|skipped","host":"web1","task":"...","action":"ansible.builtin.copy","ignore_errors":false,"msg":"..."}
+{"event":"stats","hosts":{"web1":{"ok":30,"changed":3,"failures":0,"unreachable":0,"skipped":4,"rescued":0,"ignored":0}}}
 ```
 
 It only hooks task-level `v2_runner_on_*` results (not per loop item), plus
@@ -221,7 +221,7 @@ of task names that would change and that failed. Stored as JSON in the run recor
   ("1 of 2 passed").
 - `pending` when queued, `running` when started, then `success`/`failed`/`canceled`;
   `error` is reported as `failed`.
-- Description (≤ 140 chars): e.g. `would change 4 tasks on 2 hosts`, `2 failed on khai`,
+- Description (≤ 140 chars): e.g. `would change 4 tasks on 2 hosts`, `2 failed on db1`,
   `error: setup command failed`, `superseded by a1b2c3d`.
 - `target_url`: `<public_url>/runs/<id>`.
 - `ref`: the branch name.
@@ -235,18 +235,18 @@ no task messages** (every project member can read comments), only counts and
 task names:
 
 ```markdown
-<!-- ansibled:site=404prod -->
-### ✅ ansibled · 404prod · dry run passed
-`a1b2c3d` · 3m12s · [full log](http://10.2.0.1:8471/runs/412)
+<!-- ansibled:site=mysite -->
+### ✅ ansibled · mysite · dry run passed
+`a1b2c3d` · 3m12s · [full log](http://10.0.0.1:8471/runs/412)
 
 | host | would change | failed | unreachable |
 |---|---:|---:|:-:|
-| fiona | 3 | 0 | |
-| khai | 1 | 0 | |
+| web1 | 3 | 0 | |
+| db1 | 1 | 0 | |
 
 <details><summary>Would change (4)</summary>
 
-- fiona: docker : podman-restart wait script
+- web1: nginx : deploy site config
 - …
 </details>
 ```
@@ -347,12 +347,12 @@ One YAML file (default `/etc/ansibled/ansibled.yml`). Secrets are only ever
 referenced by file path. Unknown keys are an error.
 
 ```yaml
-site: 404prod                       # status name ansibled/<site>, comment marker
-public_url: http://10.2.0.1:8471    # base for links and the OAuth redirect
+site: mysite                       # status name ansibled/<site>, comment marker
+public_url: http://10.0.0.1:8471    # base for links and the OAuth redirect
 
 listen:
-  webhook: 10.2.0.1:8470
-  web: 10.2.0.1:8471
+  webhook: 10.0.0.1:8470
+  web: 10.0.0.1:8471
 
 forge:
   type: gitlab
@@ -372,7 +372,7 @@ repo:
   collections_requirements: requirements.yml   # optional
 
 ansible:
-  inventory: inventories/404prod
+  inventory: inventories/mysite
   playbooks: [site.yml]
   extra_args: []
   remote_user: ansibled             # optional

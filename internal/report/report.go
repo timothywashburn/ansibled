@@ -25,7 +25,7 @@ const (
 
 // Describe returns the commit status description for a run (at most
 // MaxDescription runes), e.g. "would change 4 tasks on 2 hosts" or
-// "2 failed on khai".
+// "2 failed on db1".
 func Describe(r *model.Run) string {
 	if r == nil {
 		return ""

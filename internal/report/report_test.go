@@ -42,15 +42,15 @@ func TestDescribe(t *testing.T) {
 			pb("site.yml", model.HostResult{Host: "a", Changed: 1}, model.HostResult{Host: "b"}),
 		}}), "would change 1 task on a"},
 		{"failed one host", run(model.StateFailed, &model.Summary{Playbooks: []model.PlaybookResult{
-			pb("site.yml", model.HostResult{Host: "khai", Failed: 2}),
-		}}), "2 failed on khai"},
+			pb("site.yml", model.HostResult{Host: "db1", Failed: 2}),
+		}}), "2 failed on db1"},
 		{"failed two hosts across playbooks", run(model.StateFailed, &model.Summary{Playbooks: []model.PlaybookResult{
 			pb("a.yml", model.HostResult{Host: "x", Failed: 1}),
 			pb("b.yml", model.HostResult{Host: "x", Failed: 1}, model.HostResult{Host: "y", Failed: 1}),
 		}}), "3 failed on 2 hosts"},
 		{"unreachable", run(model.StateFailed, &model.Summary{Playbooks: []model.PlaybookResult{
-			pb("site.yml", model.HostResult{Host: "marvell", Unreachable: true}),
-		}}), "unreachable: marvell"},
+			pb("site.yml", model.HostResult{Host: "web3", Unreachable: true}),
+		}}), "unreachable: web3"},
 		{"failed and unreachable", run(model.StateFailed, &model.Summary{Playbooks: []model.PlaybookResult{
 			pb("site.yml", model.HostResult{Host: "a", Failed: 1}, model.HostResult{Host: "b", Unreachable: true}),
 		}}), "1 failed on a; unreachable: b"},
@@ -108,8 +108,8 @@ func TestStatusState(t *testing.T) {
 
 func TestMRCommentSuccess(t *testing.T) {
 	r := run(model.StateSuccess, &model.Summary{Playbooks: []model.PlaybookResult{pb("site.yml",
-		model.HostResult{Host: "fiona", Changed: 3, ChangedTasks: []string{"docker : podman-restart wait script", "a", "b"}},
-		model.HostResult{Host: "khai", Changed: 1, ChangedTasks: []string{"c"}},
+		model.HostResult{Host: "web1", Changed: 3, ChangedTasks: []string{"nginx : deploy site config", "a", "b"}},
+		model.HostResult{Host: "db1", Changed: 1, ChangedTasks: []string{"c"}},
 	)}})
 	got := MRComment(r, "lab", marker, "http://ansibled.example/runs/412")
 	want := marker + `
@@ -118,15 +118,15 @@ func TestMRCommentSuccess(t *testing.T) {
 
 | host | would change | failed | unreachable |
 |---|---:|---:|:-:|
-| fiona | 3 | 0 |  |
-| khai | 1 | 0 |  |
+| web1 | 3 | 0 |  |
+| db1 | 1 | 0 |  |
 
 <details><summary>Would change (4)</summary>
 
-- fiona: docker : podman-restart wait script
-- fiona: a
-- fiona: b
-- khai: c
+- web1: nginx : deploy site config
+- web1: a
+- web1: b
+- db1: c
 
 </details>
 `
