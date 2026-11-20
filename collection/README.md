@@ -59,7 +59,7 @@ This also installs the dependencies `community.docker`, `community.general`,
   roles:
     - role: timothywashburn.ansibled.ansibled_target
       vars:
-        ansibled_target_public_key: "{{ hostvars[groups['ansibled'][0]].ansibled_public_key }}"
+        ansibled_target_controller: "{{ groups['ansibled'][0] }}"
         ansibled_target_from: [10.0.0.1]
 ```
 

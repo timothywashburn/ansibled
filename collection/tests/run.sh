@@ -161,9 +161,36 @@ docker exec $P-trixie grep -q stray /var/lib/ansibled/.ssh/authorized_keys && fa
 pass "authorized_keys is exclusive"
 
 play "$TARGET" -e "test_pubkey=''" -l "$P-trixie" --check
-assert_failed_with "missing key is rejected" "ansibled_target_public_key is required"
+assert_failed_with "missing key and controller is rejected" "set ansibled_target_controller"
 play "$TARGET" -e "test_pubkey='$CLIENT_KEY'" -e test_state=bogus -l "$P-trixie" --check
 assert_failed_with "bad state is rejected by argument_specs" "Validation of arguments failed"
+
+# Key read from a controller: rocky9 plays the daemon host with a fake key file.
+step "ansibled_target: key read from the controller"
+CTRL=(-e test_controller=$P-rocky9)
+play "$TARGET" "${CTRL[@]}" -l "$P-trixie" --check
+assert_failed_with "controller without a key file" "no ansibled key at /opt/ansibled/etc/secrets/ssh_key.pub on $P-rocky9: deploy the ansibled role there first"
+docker exec $P-rocky9 sh -c "mkdir -p /opt/ansibled/etc/secrets /opt/x/etc/secrets && chmod 700 /opt/ansibled/etc/secrets && echo '$CLIENT_KEY' > /opt/ansibled/etc/secrets/ssh_key.pub && chmod 400 /opt/ansibled/etc/secrets/ssh_key.pub && cp /opt/ansibled/etc/secrets/ssh_key.pub /opt/x/etc/secrets/"
+play "$TARGET" -e test_state=absent
+assert_ok "reset before the controller tests"
+play "$TARGET" "${CTRL[@]}" -e "$FROM" -l "$P-trixie" --check
+assert_ok "check mode, key from the controller, --limit excluding it"
+play "$TARGET" "${CTRL[@]}" -e "$FROM" -l "$P-trixie"
+assert_ok "apply, key from the controller, --limit excluding it"
+ssh_client "$TRIXIE_IP" || fail "ssh with the key read from the controller"
+pass "login works with the key read from the controller"
+play "$TARGET" "${CTRL[@]}" -e "$FROM"
+assert_ok "apply to all hosts, key from the controller"
+play "$TARGET" "${CTRL[@]}" -e "$FROM"
+assert_unchanged "second apply, key from the controller"
+play "$TARGET" "${CTRL[@]}" -e "$FROM" --check
+assert_unchanged "check mode after apply, key from the controller"
+for h in $ROCKY_IP $TRIXIE_IP; do ssh_client "$h" || fail "ssh to $h"; done
+pass "both targets accept the controller's key"
+play "$TARGET" -e test_controller=$P-rocky9 -e test_controller_dir=/opt/x -e "$FROM"
+assert_unchanged "ansibled_target_controller_dir"
+play "$TARGET" "${CTRL[@]}" -e "test_pubkey='$CLIENT_KEY'" -e "$FROM"
+assert_unchanged "explicit key given too (controller ignored)"
 
 play "$TARGET" -e "test_pubkey='$CLIENT_KEY'" -e test_state=absent
 assert_ok "state=absent"

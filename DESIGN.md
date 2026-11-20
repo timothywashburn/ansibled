@@ -537,7 +537,8 @@ collections:
 - Local user `ansibled_target_user` (default `ansibled`), home
   `/var/lib/ansibled`, not in any directory service, so it works when
   FreeIPA/LDAP is down.
-- `authorized_keys` with `ansibled_target_public_key`, restricted with
+- `authorized_keys` with the daemon's key (`ansibled_target_public_key`, or read from
+  `ansibled_target_controller`'s `etc/secrets/ssh_key.pub`), restricted with
   `from="<ansibled_target_from>"` when set.
 - `/etc/sudoers.d/ansibled`: `NOPASSWD: ALL`, validated with `visudo -cf`.
 - SELinux hosts: `ssh_home_t` context on the `.ssh` folder.

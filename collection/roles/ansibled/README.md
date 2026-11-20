@@ -113,7 +113,7 @@ After the secrets are written, the role sets these facts (no_log) for later play
 
 | Fact | Content |
 |---|---|
-| `ansibled_public_key` | The daemon's SSH public key, for `ansibled_target` |
+| `ansibled_public_key` | The daemon's SSH public key (`ansibled_target` can also read it with `ansibled_target_controller`) |
 | `ansibled_webhook_secret_effective` | The webhook secret on the host |
 | `ansibled_metrics_token_effective` | The metrics token on the host (e.g. for a Prometheus `credentials_file`) |
 
@@ -211,6 +211,6 @@ collections:
   roles:
     - role: timothywashburn.ansibled.ansibled_target
       vars:
-        ansibled_target_public_key: "{{ hostvars[groups['ansibled'][0]].ansibled_public_key }}"
+        ansibled_target_controller: "{{ groups['ansibled'][0] }}"
         ansibled_target_from: [10.0.0.1]
 ```

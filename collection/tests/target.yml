@@ -2,6 +2,8 @@
 # Extra vars:
 #   test_pubkey  key(s) to authorize (default: ansibled_public_key from the daemon
 #                host, when this playbook runs after daemon.yml as in site.yml)
+#   test_controller  inventory host to read the key from instead (ansibled_target_controller)
+#   test_controller_dir  its ansibled_dir (default /opt/ansibled)
 #   test_from    list for ansibled_target_from (default [])
 #   test_state   present | absent (default present)
 - name: Prepare managed hosts
@@ -10,6 +12,8 @@
   roles:
     - role: timothywashburn.ansibled.ansibled_target
       vars:
-        ansibled_target_public_key: "{{ test_pubkey | default(hostvars[groups['daemon'][0]].ansibled_public_key) }}"
+        ansibled_target_public_key: "{{ '' if test_controller is defined else (test_pubkey | default(hostvars[groups['daemon'][0]].ansibled_public_key | default(''))) }}"
+        ansibled_target_controller: "{{ test_controller | default('') }}"
+        ansibled_target_controller_dir: "{{ test_controller_dir | default('/opt/ansibled') }}"
         ansibled_target_from: "{{ test_from | default([]) }}"
         ansibled_target_state: "{{ test_state | default('present') }}"

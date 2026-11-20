@@ -22,11 +22,18 @@ Supported: EL 8/9/10 and Debian 12/13. Supports check mode.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ansibled_target_public_key` | **required** for `present` | The daemon's SSH public key |
+| `ansibled_target_controller` | unset | Inventory hostname of the host running the ansibled daemon; its key is read from there. One of this and `ansibled_target_public_key` is required for `present` |
+| `ansibled_target_controller_dir` | `/opt/ansibled` | The `ansibled_dir` used on the controller |
+| `ansibled_target_public_key` | unset | The daemon's SSH public key; when set it is used as is and the controller is not contacted |
 | `ansibled_target_from` | `[]` | Addresses/CIDRs/patterns the key may be used from |
 | `ansibled_target_user` | `ansibled` | Local user name (match `ansible.remote_user` in the ansibled config) |
 | `ansibled_target_home` | `/var/lib/ansibled` | Home directory |
 | `ansibled_target_state` | `present` | `present` or `absent` |
+
+The key is read (as root, read-only, so also in check mode) from
+`<ansibled_target_controller_dir>/etc/secrets/ssh_key.pub` on the controller
+with `delegate_to`, so it works with `--limit` excluding the controller. Deploy
+the `ansibled` role there first.
 
 ## Example
 
@@ -37,9 +44,15 @@ Supported: EL 8/9/10 and Debian 12/13. Supports check mode.
   roles:
     - role: timothywashburn.ansibled.ansibled_target
       vars:
-        # From the ansibled role in an earlier play, or paste the key.
-        ansibled_target_public_key: "{{ hostvars[groups['ansibled'][0]].ansibled_public_key }}"
+        ansibled_target_controller: "{{ groups['ansibled'][0] }}"
         ansibled_target_from: [10.0.0.1]
 ```
 
-If several ansibled instances manage the same host, put their keys in one string, one per line.
+Alternatively give the key explicitly (it takes precedence):
+
+```yaml
+        ansibled_target_public_key: "ssh-ed25519 AAAA... ansibled"
+```
+
+If several ansibled instances manage the same host, put their keys in one
+`ansibled_target_public_key` string, one per line.

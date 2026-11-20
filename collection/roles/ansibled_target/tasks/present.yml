@@ -1,9 +1,53 @@
 ---
-- name: Check that the daemon's public key was given
+# The key is either given, or read from the host running the ansibled daemon.
+- name: Check that a key or a controller was given
   ansible.builtin.assert:
-    that: ansibled_target_public_key | default('') | trim | length > 0
-    fail_msg: ansibled_target_public_key is required (the ansibled daemon's SSH public key)
+    that: >-
+      ansibled_target_public_key | default('') | trim | length > 0
+      or ansibled_target_controller | default('') | length > 0
+    fail_msg: >-
+      set ansibled_target_controller (the host running the ansibled daemon)
+      or ansibled_target_public_key (the daemon's SSH public key)
     quiet: true
+
+# Read-only, so it also runs in check mode. run_once: the registered result is
+# available to every host of the batch. delegate_to works with --limit
+# excluding the controller.
+- name: Look for the daemon's public key on the controller
+  ansible.builtin.stat:
+    path: "{{ ansibled_target_controller_dir }}/etc/secrets/ssh_key.pub"
+  delegate_to: "{{ ansibled_target_controller | default(inventory_hostname, true) }}"
+  run_once: true
+  become: true
+  check_mode: false
+  register: _ansibled_target_key_stat
+  when: ansibled_target_public_key | default('') | trim | length == 0
+
+- name: Check that the controller has a key
+  ansible.builtin.assert:
+    that: _ansibled_target_key_stat.stat.exists
+    fail_msg: >-
+      no ansibled key at {{ ansibled_target_controller_dir }}/etc/secrets/ssh_key.pub
+      on {{ ansibled_target_controller }}: deploy the ansibled role there first
+    quiet: true
+  run_once: true
+  when: ansibled_target_public_key | default('') | trim | length == 0
+
+- name: Read the daemon's public key from the controller
+  ansible.builtin.slurp:
+    src: "{{ ansibled_target_controller_dir }}/etc/secrets/ssh_key.pub"
+  delegate_to: "{{ ansibled_target_controller | default(inventory_hostname, true) }}"
+  run_once: true
+  become: true
+  check_mode: false
+  register: _ansibled_target_key_slurp
+  when: ansibled_target_public_key | default('') | trim | length == 0
+
+- name: Settle on the key to authorize
+  ansible.builtin.set_fact:
+    _ansibled_target_key: >-
+      {{ (ansibled_target_public_key | trim) if ansibled_target_public_key | default('') | trim | length > 0
+      else (_ansibled_target_key_slurp.content | b64decode | trim) }}
 
 - name: Create the ansibled user
   ansible.builtin.user:
@@ -35,7 +79,7 @@
   ansible.posix.authorized_key:
     user: "{{ ansibled_target_user }}"
     path: "{{ ansibled_target_home }}/.ssh/authorized_keys"
-    key: "{{ ansibled_target_public_key | trim }}"
+    key: "{{ _ansibled_target_key }}"
     key_options: "{{ ('from=\"' ~ ansibled_target_from | join(',') ~ '\"') if ansibled_target_from else omit }}"
     exclusive: true
     manage_dir: false

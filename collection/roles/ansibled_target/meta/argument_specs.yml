@@ -23,10 +23,23 @@ argument_specs:
         description:
           - Home directory of the user (created with mode 0700).
           - On SELinux hosts it must be somewhere the policy labels C(<home>/.ssh) as C(ssh_home_t), such as C(/var/lib/<name>).
+      ansibled_target_controller:
+        type: str
+        description:
+          - Inventory hostname of the host running the ansibled daemon.
+          - Used when O(ansibled_target_public_key) is not set. The key is read from
+            C(<ansibled_target_controller_dir>/etc/secrets/ssh_key.pub) on that host (as root,
+            also in check mode), so the ansibled role must have been applied there.
+          - One of this and O(ansibled_target_public_key) is required when O(ansibled_target_state=present).
+      ansibled_target_controller_dir:
+        type: path
+        default: /opt/ansibled
+        description: The C(ansibled_dir) used by the ansibled role on O(ansibled_target_controller).
       ansibled_target_public_key:
         type: str
         description:
-          - The ansibled daemon's SSH public key. Required when O(ansibled_target_state=present).
+          - The ansibled daemon's SSH public key. When set it is used as is and
+            O(ansibled_target_controller) is ignored. Several keys can be given, one per line.
           - C(authorized_keys) is managed exclusively, other keys are removed.
       ansibled_target_from:
         type: list
