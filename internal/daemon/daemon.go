@@ -357,15 +357,9 @@ func (d *Daemon) Rerun(ctx context.Context, id int64, user string) (*model.Run, 
 		}
 		req.SHA, req.Ref, req.MRIID = mr.HeadSHA, mr.SourceBranch, mr.IID
 	default:
-		def, err := d.forge.DefaultBranch(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("default branch: %w", err)
+		if req.Ref, req.SHA, err = d.mainHead(ctx); err != nil {
+			return nil, err
 		}
-		head, err := d.forge.BranchHead(ctx, def)
-		if err != nil {
-			return nil, fmt.Errorf("head of %s: %w", def, err)
-		}
-		req.SHA, req.Ref = head, def
 	}
 	if req.SHA == "" {
 		return nil, ActionError("the forge returned no commit to run")
@@ -376,6 +370,42 @@ func (d *Daemon) Rerun(ctx context.Context, id int64, user string) (*model.Run, 
 	}
 	d.log.Info("re-run from the web UI", "of", id, "run", r.ID, "kind", r.Kind, "sha", r.ShortSHA(), "by", user)
 	return r, nil
+}
+
+// RunMain queues a main run of the default branch's current head for user,
+// who pressed "Run main" in the web UI. It always runs (no dedupe) and
+// supersedes a queued or running main run.
+func (d *Daemon) RunMain(ctx context.Context, user string) (*model.Run, error) {
+	ctx, cancel := context.WithTimeout(ctx, forgeTimeout)
+	defer cancel()
+	ref, sha, err := d.mainHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := d.Queue.Enqueue(ctx, queue.Request{
+		Kind: model.KindMain, SHA: sha, Ref: ref, Trigger: model.TriggerWeb, TriggeredBy: user, Force: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d.log.Info("main run from the web UI", "run", r.ID, "sha", r.ShortSHA(), "by", user)
+	return r, nil
+}
+
+// mainHead returns the default branch and its head commit.
+func (d *Daemon) mainHead(ctx context.Context) (branch, sha string, err error) {
+	branch, err = d.forge.DefaultBranch(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("default branch: %w", err)
+	}
+	sha, err = d.forge.BranchHead(ctx, branch)
+	if err != nil {
+		return "", "", fmt.Errorf("head of %s: %w", branch, err)
+	}
+	if sha == "" {
+		return "", "", ActionError("the forge returned no commit for " + branch)
+	}
+	return branch, sha, nil
 }
 
 // Cancel cancels queued or running run id for user, who signed in to the web UI.

@@ -511,3 +511,21 @@ func TestWebRerunAndCancel(t *testing.T) {
 		t.Errorf("second cancel err = %v", err)
 	}
 }
+
+func TestWebRunMain(t *testing.T) {
+	f := newFixture(t, false)
+	ctx := context.Background()
+	r, err := f.d.RunMain(ctx, "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != model.KindMain || r.SHA != shaM || r.Ref != "main" || r.Trigger != model.TriggerWeb || r.TriggeredBy != "carol" {
+		t.Errorf("run = %+v", r)
+	}
+	f.waitFor("main run", allFinished(1))
+	// It always runs, even for a commit that already has a run.
+	if _, err := f.d.RunMain(ctx, "carol"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitFor("second main run", allFinished(2))
+}

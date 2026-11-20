@@ -12,6 +12,7 @@
     <button class="btn" type="submit">Filter</button>
     {{- if .Filters}}<a class="btn ghost" href="/runs">Clear</a>{{end}}
   </form>
+  {{template "run-main" .}}
 </div>
 <div id="live" data-live="{{if eq .Page 1}}5000{{end}}">
 {{template "runs-live" .}}

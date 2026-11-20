@@ -64,6 +64,8 @@ type base struct {
 	User  string // empty when not signed in
 	CSRF  string // form token, empty when not signed in
 	Nav   string // "overview", "runs" or ""
+	// CanRun shows the "Run main" button (actions enabled, signed in).
+	CanRun bool
 }
 
 type messagePage struct {
@@ -195,6 +197,7 @@ func (s *Server) base(sess *session, title, nav string) base {
 	if sess != nil {
 		b.User = sess.Username
 		b.CSRF = s.csrfToken(sess)
+		b.CanRun = s.o.Actions != nil
 	}
 	return b
 }

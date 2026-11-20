@@ -102,6 +102,10 @@ a.tile:hover { text-decoration: none; border-color: var(--line-2); }
 .btn.ghost { background: transparent; }
 .btn.small { height: 26px; padding: 0 8px; font-size: 12.5px; }
 .btn.danger { color: var(--bad); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.runmain { margin: 0; }
+.filters + .runmain { margin-left: auto; }
 .btn.danger.confirm { background: var(--bad); border-color: var(--bad); color: #fff; }
 .btn[aria-pressed="true"] { background: var(--surface-2); border-color: var(--accent); }
 .filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }

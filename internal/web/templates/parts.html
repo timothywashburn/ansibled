@@ -1,3 +1,12 @@
+{{define "run-main" -}}
+{{- if .CanRun}}
+<form method="post" action="/run/main" class="runmain">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <button class="btn primary" type="submit" title="Dry-run the current head of the default branch now">{{icon "rerun"}}<span>Run main</span></button>
+</form>
+{{- end}}
+{{- end}}
+
 {{define "badge" -}}
 <span class="badge s-{{.}}">{{icon (print .)}}<span>{{.}}</span></span>
 {{- end}}

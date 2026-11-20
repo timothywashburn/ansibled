@@ -43,6 +43,8 @@ type Actions interface {
 	Rerun(ctx context.Context, id int64, user string) (*model.Run, error)
 	// Cancel cancels a queued or running run.
 	Cancel(ctx context.Context, id int64, user string) error
+	// RunMain queues a main run of the default branch's head.
+	RunMain(ctx context.Context, user string) (*model.Run, error)
 }
 
 // Links is optionally implemented by the Forge to link commits and MRs.
@@ -200,6 +202,7 @@ func (s *Server) mux(webhook, web bool) http.Handler {
 		m.Handle("GET /runs/{id}/stream", s.requireSession(s.runStream))
 		m.Handle("POST /runs/{id}/rerun", s.requireSession(s.rerun))
 		m.Handle("POST /runs/{id}/cancel", s.requireSession(s.cancel))
+		m.Handle("POST /run/main", s.requireSession(s.runMain))
 	}
 	return securityHeaders(m)
 }

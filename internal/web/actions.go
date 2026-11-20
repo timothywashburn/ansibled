@@ -38,16 +38,24 @@ func (s *Server) checkForm(w http.ResponseWriter, r *http.Request, sess *session
 	return hmac.Equal(got, want)
 }
 
-// action checks the request and the run id shared by the buttons.
-func (s *Server) action(w http.ResponseWriter, r *http.Request, sess *session) (int64, bool) {
+// allowed checks that actions are enabled and the form is ours.
+func (s *Server) allowed(w http.ResponseWriter, r *http.Request, sess *session) bool {
 	if s.o.Actions == nil {
 		s.message(w, r, sess, http.StatusNotFound, "Not available", "Actions are not enabled on this instance.", "/", "Overview")
-		return 0, false
+		return false
 	}
 	if !s.checkForm(w, r, sess) {
 		s.log.Warn("rejected form post", "user", sess.Username, "path", r.URL.Path, "remote", r.RemoteAddr)
 		s.message(w, r, sess, http.StatusForbidden, "Request rejected",
 			"The form was stale or did not come from this site. Reload the page and try again.", "", "")
+		return false
+	}
+	return true
+}
+
+// action checks the request and the run id shared by the run buttons.
+func (s *Server) action(w http.ResponseWriter, r *http.Request, sess *session) (int64, bool) {
+	if !s.allowed(w, r, sess) {
 		return 0, false
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -68,7 +76,24 @@ func (s *Server) actionFailed(w http.ResponseWriter, r *http.Request, sess *sess
 	} else {
 		s.log.Error(what, "run", id, "user", sess.Username, "err", err)
 	}
-	s.message(w, r, sess, status, "Not done", msg, fmt.Sprintf("/runs/%d", id), "Back to the run")
+	link, text := fmt.Sprintf("/runs/%d", id), "Back to the run"
+	if id == 0 {
+		link, text = "/", "Overview"
+	}
+	s.message(w, r, sess, status, "Not done", msg, link, text)
+}
+
+// runMain queues a main run and redirects to it.
+func (s *Server) runMain(w http.ResponseWriter, r *http.Request, sess *session) {
+	if !s.allowed(w, r, sess) {
+		return
+	}
+	nr, err := s.o.Actions.RunMain(r.Context(), sess.Username)
+	if err != nil {
+		s.actionFailed(w, r, sess, 0, "start a main run", err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/runs/%d#log", nr.ID), http.StatusSeeOther)
 }
 
 // rerun queues a run again and redirects to the new run.

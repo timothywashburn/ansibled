@@ -283,6 +283,7 @@ type fakeActions struct {
 	mu       sync.Mutex
 	reruns   []int64
 	cancels  []int64
+	mains    int
 	user     string
 	rerunErr error
 }
@@ -295,6 +296,16 @@ func (f *fakeActions) Rerun(_ context.Context, id int64, user string) (*model.Ru
 		return nil, f.rerunErr
 	}
 	return &model.Run{ID: 42}, nil
+}
+
+func (f *fakeActions) RunMain(_ context.Context, user string) (*model.Run, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mains, f.user = f.mains+1, user
+	if f.rerunErr != nil {
+		return nil, f.rerunErr
+	}
+	return &model.Run{ID: 43}, nil
 }
 
 func (f *fakeActions) Cancel(_ context.Context, id int64, user string) error {
@@ -448,5 +459,40 @@ func TestStaticAssets(t *testing.T) {
 	}
 	if res := e.do(t, "GET", "/static/nope.js", nil, nil); res.StatusCode != 404 {
 		t.Errorf("missing asset: %d", res.StatusCode)
+	}
+}
+
+func TestRunMainButton(t *testing.T) {
+	fa := &fakeActions{}
+	e := newEnv(t, func(o *Options) { o.Actions = fa })
+	sc := e.login(t)
+	var token string
+	for _, page := range []string{"/", "/runs"} {
+		body := readBody(t, e.do(t, "GET", page, nil, nil, sc))
+		m := csrfRe.FindStringSubmatch(body)
+		if m == nil || !strings.Contains(body, `action="/run/main"`) {
+			t.Fatalf("%s: no Run main button", page)
+		}
+		token = m[1]
+	}
+	hdr := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	form := func(tok string) *strings.Reader { return strings.NewReader(url.Values{"csrf": {tok}}.Encode()) }
+	res := e.do(t, "POST", "/run/main", form(token), hdr, sc)
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/runs/43#log" || fa.mains != 1 || fa.user != "alice" {
+		t.Errorf("run main: %d %q mains=%d user=%q", res.StatusCode, res.Header.Get("Location"), fa.mains, fa.user)
+	}
+	if res := e.do(t, "POST", "/run/main", form("bad"), hdr, sc); res.StatusCode != http.StatusForbidden || fa.mains != 1 {
+		t.Errorf("bad token: %d", res.StatusCode)
+	}
+	fa.rerunErr = daemon.ActionError("the forge returned no commit for main")
+	res = e.do(t, "POST", "/run/main", form(token), hdr, sc)
+	if b := readBody(t, res); res.StatusCode != http.StatusConflict || !strings.Contains(b, "no commit for main") || !strings.Contains(b, `href="/"`) {
+		t.Errorf("error: %d", res.StatusCode)
+	}
+
+	// Without actions there is no button.
+	e2 := newEnv(t, nil)
+	if body := readBody(t, e2.do(t, "GET", "/", nil, nil, e2.login(t))); strings.Contains(body, "/run/main") {
+		t.Error("button shown without Actions")
 	}
 }

@@ -305,6 +305,7 @@ Pages (all behind sign-in):
 | `/runs/<id>/stream` | Server-Sent Events: `run` (state, at the start and on every change), `log` (new complete lines, `id:` = byte offset, so a reconnecting browser resumes with `Last-Event-ID`), `done`. The log file is polled every 250 ms and the run every second. A first connection to a log larger than 2 MiB starts at its last 2 MiB. |
 | `/runs/<id>/log.txt` | Raw log without colour codes; `?ansi=1` keeps them, `?download=1` makes it an attachment. |
 | `POST /runs/<id>/rerun`, `POST /runs/<id>/cancel` | Buttons. Re-run queues the run's kind again (trigger `web`, forced): an MR run at the MR's current head (refused if the MR is not open), a main or nightly run at the current head of the default branch, so an old commit never overwrites newer results. Cancel cancels that one queued or running run ("canceled by <user>"). |
+| `POST /run/main` | "Run main" button on the overview and the run list: queues a main run (trigger `web`, forced) of the default branch's current head, which sets its commit status and drift metrics like any main run. |
 
 Pages are server-rendered with `html/template`; one embedded script
 (`internal/web/static/app.js`, no dependencies) adds the console, tabs, live
