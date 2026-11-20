@@ -48,7 +48,7 @@ argument_specs:
           public_url:
             type: str
             required: true
-            description: Base URL of the web listener, for links and the OAuth redirect.
+            description: Base URL of the web listener, for links and the sign-in redirect (C(<public_url>/oauth/callback)).
           listen:
             type: dict
             required: true
@@ -141,6 +141,34 @@ argument_specs:
           retention:
             type: str
             description: How long run logs are kept, e.g. C(720h).
+          web:
+            type: dict
+            required: true
+            description:
+              - Web UI settings. C(metrics_token_file), C(session_key_file) and the OIDC
+                client id/secret files are set by the role.
+            options:
+              oidc:
+                type: dict
+                required: true
+                description: OpenID Connect provider for the web UI sign-in.
+                options:
+                  issuer:
+                    type: str
+                    required: true
+                    description: Issuer URL, e.g. C(https://auth.example.org/application/o/ansibled/).
+                  allowed_groups:
+                    type: list
+                    elements: str
+                    required: true
+                    description: Groups (from the groups claim) allowed to read the logs; a user needs one of them.
+                  groups_claim:
+                    type: str
+                    description: Userinfo claim holding the groups (ansibled default C(groups)).
+                  scopes:
+                    type: list
+                    elements: str
+                    description: Scopes to request (ansibled default C([openid, profile, email])); must include C(openid).
 
       ansibled_forge_token:
         type: str
@@ -148,17 +176,17 @@ argument_specs:
         description:
           - GitLab project access token (Developer, scopes api and read_repository).
           - Required on the first deploy. When undefined later, the file already on the host is kept.
-      ansibled_oauth_client_id:
+      ansibled_oidc_client_id:
         type: str
         no_log: true
         description:
-          - GitLab OAuth application id.
+          - OpenID Connect client id (web UI sign-in).
           - Required on the first deploy. When undefined later, the file already on the host is kept.
-      ansibled_oauth_client_secret:
+      ansibled_oidc_client_secret:
         type: str
         no_log: true
         description:
-          - GitLab OAuth application secret.
+          - OpenID Connect client secret.
           - Required on the first deploy. When undefined later, the file already on the host is kept.
       ansibled_webhook_secret:
         type: str
@@ -201,15 +229,6 @@ argument_specs:
         type: bool
         default: false
         description: Delete overlay files that are not in O(ansibled_overlay_files).
-
-      ansibled_manage_firewalld:
-        type: bool
-        default: false
-        description: Open both listen ports in firewalld.
-      ansibled_firewalld_zone:
-        type: str
-        default: public
-        description: firewalld zone for the listen ports.
 
       ansibled_gitlab_hook_token:
         type: str

@@ -36,16 +36,14 @@ const (
 
 // Options configure a Client.
 type Options struct {
-	BaseURL           string // e.g. https://gitlab.example.org
-	Project           string // "myorg/infra" or a numeric project id
-	Token             string // project access token, sent as PRIVATE-TOKEN
-	WebhookSecret     string // expected X-Gitlab-Token
-	TrustedGroup      string // e.g. "myorg/sysadmins" (path or numeric id)
-	OAuthClientID     string
-	OAuthClientSecret string
+	BaseURL       string // e.g. https://gitlab.example.org
+	Project       string // "myorg/infra" or a numeric project id
+	Token         string // project access token, sent as PRIVATE-TOKEN
+	WebhookSecret string // expected X-Gitlab-Token
+	TrustedGroup  string // e.g. "myorg/sysadmins" (path or numeric id)
 	// CloneURL overrides the fetch URL returned by GitAuth (tests, mirrors).
 	CloneURL string
-	// HTTPClient is used for all API and OAuth calls. Default: 30 s timeout.
+	// HTTPClient is used for all API calls. Default: 30 s timeout.
 	HTTPClient *http.Client
 	Logger     *slog.Logger
 }

@@ -1,6 +1,6 @@
 // Package web serves ansibled's HTTP endpoints (DESIGN.md "Web UI and auth"):
-// the forge webhook, the log pages behind forge OAuth sign-in, /metrics behind
-// a bearer token, and /healthz.
+// the forge webhook, the log pages behind OpenID Connect sign-in, /metrics
+// behind a bearer token, and /healthz.
 package web
 
 import (
@@ -19,6 +19,7 @@ import (
 	"github.com/timothywashburn/ansibled/internal/forge"
 	"github.com/timothywashburn/ansibled/internal/metrics"
 	"github.com/timothywashburn/ansibled/internal/model"
+	"github.com/timothywashburn/ansibled/internal/oidc"
 )
 
 // RunSource is implemented by the store.
@@ -29,10 +30,21 @@ type RunSource interface {
 	ListRuns(ctx context.Context, limit, offset int) ([]*model.Run, error)
 }
 
+// SignIn signs people in to the web UI. *oidc.Provider implements it.
+type SignIn interface {
+	// AuthCodeURL builds the provider's authorization URL; verifier is the
+	// PKCE code verifier. It fails if the provider cannot be reached.
+	AuthCodeURL(state, verifier, redirectURL string) (string, error)
+	// Login exchanges the code and returns who signed in and whether they
+	// are in an allowed group.
+	Login(ctx context.Context, code, verifier, redirectURL string) (oidc.Identity, error)
+}
+
 // Options configure a Server.
 type Options struct {
 	Config       *config.Config
-	Forge        forge.Forge // HandleWebhook, Name, OAuth, IsTrusted
+	Forge        forge.Forge // Name and HandleWebhook
+	SignIn       SignIn      // web UI sign-in
 	Runs         RunSource
 	LogPath      func(id int64) string // path of a run's log.txt
 	Metrics      *metrics.Metrics
@@ -82,6 +94,9 @@ func New(o Options) (*Server, error) {
 	}
 	if o.Forge == nil {
 		return nil, errors.New("web: Forge is required")
+	}
+	if o.SignIn == nil {
+		return nil, errors.New("web: SignIn is required")
 	}
 	if o.Runs == nil {
 		return nil, errors.New("web: Runs is required")

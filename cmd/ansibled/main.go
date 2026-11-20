@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/timothywashburn/ansibled/internal/config"
@@ -20,6 +21,7 @@ import (
 	"github.com/timothywashburn/ansibled/internal/forge/gitlab"
 	"github.com/timothywashburn/ansibled/internal/metrics"
 	"github.com/timothywashburn/ansibled/internal/model"
+	"github.com/timothywashburn/ansibled/internal/oidc"
 	"github.com/timothywashburn/ansibled/internal/queue"
 	"github.com/timothywashburn/ansibled/internal/report"
 	"github.com/timothywashburn/ansibled/internal/store"
@@ -64,7 +66,7 @@ func main() {
 		_ = fs.Parse(args)
 		err = serve(*configPath, log)
 	case "check-config":
-		online := fs.Bool("online", false, "also check the forge token, project, trusted group and SSH key")
+		online := fs.Bool("online", false, "also check the forge token, project and trusted group, and OIDC discovery")
 		_ = fs.Parse(args)
 		err = checkConfig(*configPath, *online)
 	case "run-once":
@@ -93,8 +95,8 @@ func logLevel() slog.Level {
 
 // secrets read once at startup.
 type secrets struct {
-	forgeToken, webhookSecret, oauthID, oauthSecret, metricsToken string
-	sessionKey                                                    []byte
+	forgeToken, webhookSecret, oidcID, oidcSecret, metricsToken string
+	sessionKey                                                  []byte
 }
 
 func readSecrets(c *config.Config) (secrets, error) {
@@ -109,8 +111,8 @@ func readSecrets(c *config.Config) (secrets, error) {
 	}
 	read(c.Forge.TokenFile, &s.forgeToken)
 	read(c.Forge.WebhookSecretFile, &s.webhookSecret)
-	read(c.Forge.OAuth.ClientIDFile, &s.oauthID)
-	read(c.Forge.OAuth.ClientSecretFile, &s.oauthSecret)
+	read(c.Web.OIDC.ClientIDFile, &s.oidcID)
+	read(c.Web.OIDC.ClientSecretFile, &s.oidcSecret)
 	read(c.Web.MetricsTokenFile, &s.metricsToken)
 	if c.Web.SessionKeyFile != "" {
 		var k string
@@ -129,15 +131,25 @@ func readSecrets(c *config.Config) (secrets, error) {
 
 func newForge(c *config.Config, s secrets, log *slog.Logger) (*gitlab.Client, error) {
 	return gitlab.New(gitlab.Options{
-		BaseURL:           c.Forge.URL,
-		Project:           c.Forge.Project,
-		Token:             s.forgeToken,
-		WebhookSecret:     s.webhookSecret,
-		TrustedGroup:      c.Forge.TrustedGroup,
-		OAuthClientID:     s.oauthID,
-		OAuthClientSecret: s.oauthSecret,
-		CloneURL:          c.Forge.CloneURL,
-		Logger:            log.With("component", "gitlab"),
+		BaseURL:       c.Forge.URL,
+		Project:       c.Forge.Project,
+		Token:         s.forgeToken,
+		WebhookSecret: s.webhookSecret,
+		TrustedGroup:  c.Forge.TrustedGroup,
+		CloneURL:      c.Forge.CloneURL,
+		Logger:        log.With("component", "gitlab"),
+	})
+}
+
+func newSignIn(c *config.Config, s secrets, log *slog.Logger) (*oidc.Provider, error) {
+	return oidc.New(oidc.Options{
+		Issuer:        c.Web.OIDC.Issuer,
+		ClientID:      s.oidcID,
+		ClientSecret:  s.oidcSecret,
+		Scopes:        c.Web.OIDC.Scopes,
+		GroupsClaim:   c.Web.OIDC.GroupsClaim,
+		AllowedGroups: c.Web.OIDC.AllowedGroups,
+		Logger:        log.With("component", "oidc"),
 	})
 }
 
@@ -158,6 +170,10 @@ func serve(path string, log *slog.Logger) error {
 	defer stop()
 
 	f, err := newForge(cfg, sec, log)
+	if err != nil {
+		return err
+	}
+	signIn, err := newSignIn(cfg, sec, log)
 	if err != nil {
 		return err
 	}
@@ -186,6 +202,7 @@ func serve(path string, log *slog.Logger) error {
 	srv, err := web.New(web.Options{
 		Config:       cfg,
 		Forge:        f,
+		SignIn:       signIn,
 		Runs:         st,
 		LogPath:      eng.LogPath,
 		Metrics:      m,
@@ -232,15 +249,30 @@ func checkConfig(path string, online bool) error {
 	if !online {
 		return nil
 	}
-	f, err := newForge(cfg, sec, slog.New(slog.DiscardHandler))
+	discard := slog.New(slog.DiscardHandler)
+	f, err := newForge(cfg, sec, discard)
 	if err != nil {
 		return err
 	}
-	if errs := f.Check(context.Background()); len(errs) > 0 {
-		return fmt.Errorf("forge check failed:\n  %w", errors.Join(errs...))
+	signIn, err := newSignIn(cfg, sec, discard)
+	if err != nil {
+		return err
 	}
-	fmt.Println("forge token, project and trusted group: ok")
-	return nil
+	var failed []error
+	if errs := f.Check(context.Background()); len(errs) > 0 {
+		failed = append(failed, fmt.Errorf("forge check failed:\n  %w", errors.Join(errs...)))
+	} else {
+		fmt.Println("forge token, project and trusted group: ok")
+	}
+	if err := signIn.Check(context.Background()); err != nil {
+		failed = append(failed, fmt.Errorf("OIDC check failed:\n  %w", err))
+	} else {
+		fmt.Println("OIDC provider discovery: ok")
+		if strings.HasPrefix(cfg.Web.OIDC.Issuer, "http://") {
+			fmt.Println("warning: web.oidc.issuer uses plain http; use https outside tests and labs")
+		}
+	}
+	return errors.Join(failed...)
 }
 
 // runOnce runs the engine in the foreground and prints the summary. It writes

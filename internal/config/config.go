@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,14 +49,8 @@ type Forge struct {
 	TokenFile         string `yaml:"token_file"`
 	WebhookSecretFile string `yaml:"webhook_secret_file"`
 	TrustedGroup      string `yaml:"trusted_group"`
-	OAuth             OAuth  `yaml:"oauth"`
 	// CloneURL overrides the git fetch URL (tests, mirrors). Optional.
 	CloneURL string `yaml:"clone_url"`
-}
-
-type OAuth struct {
-	ClientIDFile     string `yaml:"client_id_file"`
-	ClientSecretFile string `yaml:"client_secret_file"`
 }
 
 type Repo struct {
@@ -83,7 +78,24 @@ type Schedule struct {
 type Web struct {
 	MetricsTokenFile string `yaml:"metrics_token_file"`
 	SessionKeyFile   string `yaml:"session_key_file"`
+	OIDC             OIDC   `yaml:"oidc"`
 }
+
+// OIDC is the OpenID Connect provider that signs people in to the web UI.
+type OIDC struct {
+	Issuer           string   `yaml:"issuer"`
+	ClientIDFile     string   `yaml:"client_id_file"`
+	ClientSecretFile string   `yaml:"client_secret_file"`
+	AllowedGroups    []string `yaml:"allowed_groups"`
+	GroupsClaim      string   `yaml:"groups_claim"`
+	Scopes           []string `yaml:"scopes"`
+}
+
+// Defaults of web.oidc.
+const DefaultGroupsClaim = "groups"
+
+// DefaultScopes returns the default web.oidc.scopes.
+func DefaultScopes() []string { return []string{"openid", "profile", "email"} }
 
 // Duration is a time.Duration that unmarshals from strings like "45m" or "720h".
 type Duration struct{ time.Duration }
@@ -153,6 +165,12 @@ func (c *Config) applyDefaults() {
 	if c.Schedule.Timezone == "" {
 		c.Schedule.Timezone = "UTC"
 	}
+	if c.Web.OIDC.GroupsClaim == "" {
+		c.Web.OIDC.GroupsClaim = DefaultGroupsClaim
+	}
+	if len(c.Web.OIDC.Scopes) == 0 {
+		c.Web.OIDC.Scopes = DefaultScopes()
+	}
 	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
 	c.Forge.URL = strings.TrimRight(c.Forge.URL, "/")
 }
@@ -190,12 +208,12 @@ func (c *Config) Validate() error {
 		add("forge.trusted_group: required")
 	}
 	req := map[string]string{
-		"forge.token_file":               c.Forge.TokenFile,
-		"forge.webhook_secret_file":      c.Forge.WebhookSecretFile,
-		"forge.oauth.client_id_file":     c.Forge.OAuth.ClientIDFile,
-		"forge.oauth.client_secret_file": c.Forge.OAuth.ClientSecretFile,
-		"ansible.ssh_key_file":           c.Ansible.SSHKeyFile,
-		"web.metrics_token_file":         c.Web.MetricsTokenFile,
+		"forge.token_file":            c.Forge.TokenFile,
+		"forge.webhook_secret_file":   c.Forge.WebhookSecretFile,
+		"ansible.ssh_key_file":        c.Ansible.SSHKeyFile,
+		"web.metrics_token_file":      c.Web.MetricsTokenFile,
+		"web.oidc.client_id_file":     c.Web.OIDC.ClientIDFile,
+		"web.oidc.client_secret_file": c.Web.OIDC.ClientSecretFile,
 	}
 	for name, v := range req {
 		if v == "" {
@@ -206,6 +224,30 @@ func (c *Config) Validate() error {
 	}
 	if c.Web.SessionKeyFile != "" && !filepath.IsAbs(c.Web.SessionKeyFile) {
 		add("web.session_key_file: must be an absolute path")
+	}
+	o := c.Web.OIDC
+	if u, err := url.Parse(o.Issuer); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.RawQuery != "" || u.Fragment != "" {
+		add("web.oidc.issuer: required, an absolute http(s) URL without query or fragment")
+	}
+	if len(o.AllowedGroups) == 0 {
+		add("web.oidc.allowed_groups: list at least one group")
+	}
+	for _, g := range o.AllowedGroups {
+		if strings.TrimSpace(g) == "" {
+			add("web.oidc.allowed_groups: empty group name")
+		}
+	}
+	if strings.TrimSpace(o.GroupsClaim) == "" {
+		add("web.oidc.groups_claim: must not be empty")
+	}
+	if !slices.Contains(o.Scopes, "openid") {
+		add("web.oidc.scopes: must include openid")
+	}
+	for _, sc := range o.Scopes {
+		if sc == "" || strings.ContainsAny(sc, " \t\r\n\"\\") {
+			add("web.oidc.scopes: %q is not a valid scope", sc)
+		}
 	}
 
 	if !relClean(c.Repo.Workdir) {

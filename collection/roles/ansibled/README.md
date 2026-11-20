@@ -11,7 +11,11 @@ On the daemon host:
 - Docker with the Compose v2 plugin (`docker compose`), or Podman (see below).
 - Python 3 for the Ansible modules, and `ssh-keygen` (or the Python `cryptography`
   library) for the key pair.
-- `firewalld` only if `ansibled_manage_firewalld: true`.
+- An OpenID Connect provider (authentik, Keycloak, ...) with a confidential client
+  for the web UI sign-in, redirect URI `<public_url>/oauth/callback` (see DESIGN.md
+  "OIDC provider setup").
+
+Open `listen.webhook` (for the forge) and `listen.web` (for users and Prometheus) in your firewall yourself.
 
 On the controller: the `community.docker`, `community.crypto`, `community.general`
 and `ansible.posix` collections (installed as dependencies of this collection), and
@@ -44,16 +48,14 @@ loopback).
 | `ansibled_dir` | `/opt/ansibled` | Host directory |
 | `ansibled_uid` / `ansibled_gid` | `10001` | uid/gid the container runs as |
 | `ansibled_forge_token` | first deploy only | GitLab project access token (Developer; `api`, `read_repository`) |
-| `ansibled_oauth_client_id` | first deploy only | GitLab OAuth application id |
-| `ansibled_oauth_client_secret` | first deploy only | GitLab OAuth application secret |
+| `ansibled_oidc_client_id` | first deploy only | OpenID Connect client id (web UI sign-in) |
+| `ansibled_oidc_client_secret` | first deploy only | OpenID Connect client secret |
 | `ansibled_webhook_secret` | generated | Webhook secret token |
 | `ansibled_metrics_token` | generated | Bearer token for `/metrics` |
 | `ansibled_session_key` | generated | Web session signing key |
 | `ansibled_ssh_key_comment` | `ansibled@<site>` | Comment of the generated SSH key |
 | `ansibled_overlay_files` | `[]` | List of `{path, content \| src, mode}` copied over every checkout |
 | `ansibled_overlay_prune` | `false` | Delete overlay files not in `ansibled_overlay_files` |
-| `ansibled_manage_firewalld` | `false` | Open both listen ports in firewalld |
-| `ansibled_firewalld_zone` | `public` | firewalld zone |
 | `ansibled_gitlab_hook_token` | undefined | Enables webhook registration (Maintainer, `api`) |
 | `ansibled_gitlab_hook_url` | `http://<listen.webhook>/webhook/gitlab` | URL GitLab posts to |
 | `ansibled_gitlab_api_url` | `<forge.url>` | GitLab base URL for the API |
@@ -67,28 +69,30 @@ container paths. The role merges these over your dict, so you never write them
 (giving them anyway is an error):
 
 ```yaml
-forge: {token_file, webhook_secret_file, oauth: {client_id_file, client_secret_file}}
+forge: {token_file, webhook_secret_file}
 ansible: {ssh_key_file}
 overlay_dir, data_dir
-web: {metrics_token_file, session_key_file}
+web: {metrics_token_file, session_key_file, oidc: {client_id_file, client_secret_file}}
 ```
 
 Required: `site`, `public_url`, `listen.webhook`, `listen.web`, `forge.url`,
 `forge.project`, `forge.trusted_group`, `repo.setup`, `repo.venv_key_files`,
-`ansible.inventory`, `ansible.playbooks`. Optional: `forge.type`,
-`forge.clone_url`, `repo.workdir`, `repo.collections_requirements`,
-`ansible.extra_args`, `ansible.remote_user`, `ansible.timeout`, `ansible.env`,
-`schedule.nightly`, `schedule.timezone`, `retention`. Unknown keys fail early
+`ansible.inventory`, `ansible.playbooks`, `web.oidc.issuer`,
+`web.oidc.allowed_groups`. Optional: `forge.type`, `forge.clone_url`,
+`repo.workdir`, `repo.collections_requirements`, `ansible.extra_args`,
+`ansible.remote_user`, `ansible.timeout`, `ansible.env`, `schedule.nightly`,
+`schedule.timezone`, `retention`, `web.oidc.groups_claim` (default `groups`),
+`web.oidc.scopes` (default `[openid, profile, email]`, must include `openid`). Unknown keys fail early
 (`meta/argument_specs.yml` and an assert), because ansibled rejects them too.
 
 ## Secrets
 
 The repo that deploys ansibled is usually the repo ansibled dry-runs, and anyone
-who can read it can read its variables. **Do not commit the forge token, the OAuth
-secret or the webhook secret to it**: whoever knows the webhook secret can forge
+who can read it can read its variables. **Do not commit the forge token, the OIDC
+client secret or the webhook secret to it**: whoever knows the webhook secret can forge
 "a trusted user pushed X" webhooks and get code run as root on the site.
 
-- `ansibled_forge_token`, `ansibled_oauth_client_id`, `ansibled_oauth_client_secret`
+- `ansibled_forge_token`, `ansibled_oidc_client_id`, `ansibled_oidc_client_secret`
   are needed on the **first deploy only**, e.g. from a gitignored file:
   `ansible-playbook site.yml -e @ansibled-secrets.yml`. On later runs, leave them
   undefined and the files already on the host are kept. If one is undefined and its
@@ -185,11 +189,15 @@ collections:
           schedule:
             nightly: "0 4 * * *"
             timezone: America/Los_Angeles
+          web:
+            oidc:
+              issuer: https://auth.example.org/application/o/ansibled/
+              allowed_groups: [sysadmins]
         ansibled_overlay_files:
           - path: ansible/.vault-pass
             content: "{{ lookup('ansible.builtin.file', '~/.ansibled-vault-pass') }}"
             mode: "0400"
-        # ansibled_forge_token, ansibled_oauth_client_id/secret and (optionally)
+        # ansibled_forge_token, ansibled_oidc_client_id/secret and (optionally)
         # ansibled_gitlab_hook_token: first deploy only, -e @ansibled-secrets.yml
 
 - name: Hosts ansibled manages

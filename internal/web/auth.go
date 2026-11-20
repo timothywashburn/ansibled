@@ -13,11 +13,16 @@ import (
 	"time"
 )
 
+// sessionVersion is bumped whenever the session payload changes meaning, so
+// older cookies (version 0/1: GitLab user ids) are rejected.
+const sessionVersion = 2
+
 // session is the signed-in user, stored in a signed cookie.
 type session struct {
-	UserID   int64  `json:"uid"`
-	Username string `json:"user"`
-	Expires  int64  `json:"exp"` // unix seconds
+	Version  int    `json:"v"`
+	Subject  string `json:"sub"`  // OIDC subject
+	Username string `json:"user"` // for display and logs
+	Expires  int64  `json:"exp"`  // unix seconds
 }
 
 // oauthState is what /login remembers for /oauth/callback.
@@ -95,7 +100,8 @@ func (s *Server) clearCookie(w http.ResponseWriter, name string) {
 // currentSession returns the valid, unexpired session of the request, if any.
 func (s *Server) currentSession(r *http.Request) (*session, bool) {
 	var sess session
-	if !s.readCookie(r, s.sessionName, &sess) || s.now().Unix() >= sess.Expires || sess.Username == "" {
+	if !s.readCookie(r, s.sessionName, &sess) || sess.Version != sessionVersion ||
+		s.now().Unix() >= sess.Expires || sess.Subject == "" || sess.Username == "" {
 		return nil, false
 	}
 	return &sess, true
@@ -150,7 +156,7 @@ func randToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// login starts the OAuth authorization code flow with PKCE.
+// login starts the OpenID Connect authorization code flow with PKCE.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	state, err1 := randToken()
@@ -164,15 +170,21 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.message(w, r, nil, http.StatusInternalServerError, "Error", "Could not start sign-in.", "", "")
 		return
 	}
+	authURL, err := s.o.SignIn.AuthCodeURL(state, verifier, s.redirectURL)
+	if err != nil {
+		s.log.Warn("sign-in provider unavailable", "err", err)
+		s.message(w, r, nil, http.StatusBadGateway, "Sign-in unavailable", "Could not reach the sign-in provider.", "/login", "Try again")
+		return
+	}
 	if err := s.setCookie(w, s.oauthName, st, oauthTTL); err != nil {
 		s.message(w, r, nil, http.StatusInternalServerError, "Error", "Could not start sign-in.", "", "")
 		return
 	}
-	http.Redirect(w, r, s.o.Forge.OAuth().AuthCodeURL(state, verifier, s.redirectURL), http.StatusFound)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// callback finishes sign-in: checks state, exchanges the code, checks trust
-// and sets the session cookie.
+// callback finishes sign-in: checks state, has the provider exchange the
+// code, checks the groups and sets the session cookie.
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var st oauthState
@@ -200,30 +212,24 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.message(w, r, nil, http.StatusBadRequest, "Sign-in failed", "No authorization code was returned.", "/login", "Try again")
 		return
 	}
-	user, err := s.o.Forge.OAuth().Exchange(r.Context(), code, st.Verifier, s.redirectURL)
+	id, err := s.o.SignIn.Login(r.Context(), code, st.Verifier, s.redirectURL)
 	if err != nil {
-		s.log.Warn("oauth exchange failed", "err", err)
-		s.message(w, r, nil, http.StatusBadGateway, "Sign-in failed", "Could not complete sign-in with the forge.", "/login", "Try again")
+		s.log.Warn("sign-in failed", "err", err)
+		s.message(w, r, nil, http.StatusBadGateway, "Sign-in failed", "Could not complete sign-in with the provider.", "/login", "Try again")
 		return
 	}
-	trusted, err := s.o.Forge.IsTrusted(r.Context(), user)
-	if err != nil {
-		s.log.Warn("trust check failed", "user", user.Username, "err", err)
-		s.message(w, r, nil, http.StatusBadGateway, "Sign-in failed", "Could not check group membership.", "/login", "Try again")
-		return
-	}
-	if !trusted {
-		s.log.Warn("sign-in refused: not in trusted group", "user", user.Username, "user_id", user.ID)
+	if !id.Allowed {
+		s.log.Warn("sign-in refused: not in an allowed group", "user", id.Username, "sub", id.Subject, "groups", id.Groups)
 		s.message(w, r, nil, http.StatusForbidden, "Access denied",
-			user.Username+" is not a member of the trusted group "+s.cfg.Forge.TrustedGroup+".", "", "")
+			truncate(id.Username, 200)+" is not in an allowed group ("+strings.Join(s.cfg.Web.OIDC.AllowedGroups, ", ")+").", "", "")
 		return
 	}
-	sess := session{UserID: user.ID, Username: user.Username, Expires: s.now().Add(sessionTTL).Unix()}
+	sess := session{Version: sessionVersion, Subject: id.Subject, Username: id.Username, Expires: s.now().Add(sessionTTL).Unix()}
 	if err := s.setCookie(w, s.sessionName, sess, sessionTTL); err != nil {
 		s.message(w, r, nil, http.StatusInternalServerError, "Error", "Could not create a session.", "", "")
 		return
 	}
-	s.log.Info("signed in", "user", user.Username, "user_id", user.ID)
+	s.log.Info("signed in", "user", id.Username, "sub", id.Subject)
 	http.Redirect(w, r, safeNext(st.Next), http.StatusFound)
 }
 

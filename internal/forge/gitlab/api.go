@@ -54,9 +54,6 @@ type request struct {
 	path   string
 	query  url.Values
 	body   any
-	// bearer, when set, authenticates with "Authorization: Bearer" (a user's
-	// OAuth token) instead of ansibled's own PRIVATE-TOKEN.
-	bearer string
 }
 
 // apiURL builds the request URL so that escaped segments ("%2F") survive.
@@ -138,11 +135,7 @@ func (c *Client) attempt(ctx context.Context, req request, u *url.URL, body []by
 	}
 	hr.Header.Set("User-Agent", userAgent)
 	hr.Header.Set("Accept", "application/json")
-	if req.bearer != "" {
-		hr.Header.Set("Authorization", "Bearer "+req.bearer)
-	} else {
-		hr.Header.Set("PRIVATE-TOKEN", c.opts.Token)
-	}
+	hr.Header.Set("PRIVATE-TOKEN", c.opts.Token)
 	if body != nil {
 		hr.Header.Set("Content-Type", "application/json")
 	}

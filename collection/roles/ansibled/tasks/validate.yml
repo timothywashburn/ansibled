@@ -14,11 +14,19 @@
       - ansibled_config.repo.venv_key_files is defined and ansibled_config.repo.venv_key_files | length > 0
       - ansibled_config.ansible.inventory is defined and ansibled_config.ansible.inventory | length > 0
       - ansibled_config.ansible.playbooks is defined and ansibled_config.ansible.playbooks | length > 0
+      - ansibled_config.web.oidc.issuer is defined and ansibled_config.web.oidc.issuer is match('^https?://[^/?#]+[^?#]*$')
+      - ansibled_config.web.oidc.allowed_groups is defined
+      - ansibled_config.web.oidc.allowed_groups is sequence and ansibled_config.web.oidc.allowed_groups is not string
+      - ansibled_config.web.oidc.allowed_groups | length > 0
+      - ansibled_config.web.oidc.allowed_groups | map('string') | map('trim') | select('equalto', '') | list | length == 0
+      - ansibled_config.web.oidc.groups_claim is not defined or ansibled_config.web.oidc.groups_claim | trim | length > 0
+      - ansibled_config.web.oidc.scopes is not defined or 'openid' in ansibled_config.web.oidc.scopes
       - _ansibled_unknown_keys | length == 0
     fail_msg: >-
       ansibled_config needs site, public_url, listen.webhook, listen.web (host:port),
       forge.url, forge.project, forge.trusted_group, repo.setup, repo.venv_key_files,
-      ansible.inventory and ansible.playbooks.
+      ansible.inventory, ansible.playbooks, web.oidc.issuer (http(s) URL) and
+      web.oidc.allowed_groups (non-empty list); web.oidc.scopes, if given, must include openid.
       {% if _ansibled_unknown_keys | length > 0 %}Unknown or role-managed keys: {{ _ansibled_unknown_keys | join(', ') }}.{% endif %}
     quiet: true
 
@@ -37,7 +45,7 @@
       "content" or "src". Paths: {{ _ansibled_overlay_paths | join(', ') }}
     quiet: true
 
-# The forge token and OAuth credentials only have to be given on the first
+# The forge token and OIDC client credentials only have to be given on the first
 # deploy: afterwards the files on the host are kept when the variables are
 # undefined, so the deploying repo (which ansibled dry-runs) never holds them.
 - name: Check which required secret files exist

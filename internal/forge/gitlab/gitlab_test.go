@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -35,7 +34,6 @@ func newTest(t *testing.T, mod ...func(*Options)) (*Client, *gitlabtest.Server) 
 	o := Options{
 		BaseURL: srv.URL() + "/", Project: "myorg/infra", Token: gitlabtest.Token,
 		WebhookSecret: testSecret, TrustedGroup: "myorg/sysadmins",
-		OAuthClientID: gitlabtest.ClientID, OAuthClientSecret: gitlabtest.ClientSecret,
 		HTTPClient: srv.Client(), Logger: discardLogger(),
 	}
 	for _, m := range mod {
@@ -526,55 +524,5 @@ func TestCheck(t *testing.T) {
 	}
 	if !slices.Contains(srv4.Requests(), "GET /api/v4/groups/myorg%2Fsysadmins/members/all?per_page=1") {
 		t.Errorf("requests: %v", srv4.Requests())
-	}
-}
-
-func TestOAuthRoundTrip(t *testing.T) {
-	c, srv := newTest(t)
-	srv.AddOAuthUser("code-1", alice)
-	const redirect = "http://ansibled.invalid/oauth/callback"
-	verifier := "verifier-0123456789-0123456789-0123456789-abc"
-	o := c.OAuth()
-
-	authURL := o.AuthCodeURL("st4te", verifier, redirect)
-	u, err := url.Parse(authURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q := u.Query()
-	if u.Path != "/oauth/authorize" || q.Get("client_id") != gitlabtest.ClientID || q.Get("redirect_uri") != redirect ||
-		q.Get("response_type") != "code" || q.Get("scope") != "read_user" || q.Get("state") != "st4te" ||
-		q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" || strings.Contains(authURL, verifier) {
-		t.Fatalf("auth URL %s", authURL)
-	}
-
-	// Follow the authorize step like a browser, without following the redirect.
-	hc := *srv.Client()
-	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := hc.Get(authURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	loc, err := url.Parse(resp.Header.Get("Location"))
-	if resp.StatusCode != http.StatusFound || err != nil {
-		t.Fatalf("authorize: %d %v", resp.StatusCode, err)
-	}
-	if loc.Query().Get("code") != "code-1" || loc.Query().Get("state") != "st4te" || !strings.HasPrefix(loc.String(), redirect) {
-		t.Fatalf("redirect %s", loc)
-	}
-
-	if _, err := o.Exchange(ctx, "code-1", "wrong-verifier-0123456789-0123456789-01", redirect); err == nil {
-		t.Error("wrong verifier accepted")
-	}
-	got, err := o.Exchange(ctx, "code-1", verifier, redirect)
-	if err != nil || got != alice {
-		t.Fatalf("Exchange = %v, %v", got, err)
-	}
-	if _, err := o.Exchange(ctx, "code-1", verifier, redirect); err == nil {
-		t.Error("code reused")
-	}
-	if _, err := o.Exchange(ctx, "never-issued", verifier, redirect); err == nil {
-		t.Error("unknown code accepted")
 	}
 }

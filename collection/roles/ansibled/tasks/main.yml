@@ -14,10 +14,6 @@
 - name: Render ansibled.yml and compose.yml
   ansible.builtin.import_tasks: config.yml
 
-- name: Open the listen ports in firewalld
-  ansible.builtin.import_tasks: firewalld.yml
-  when: ansibled_manage_firewalld | bool
-
 - name: Run the container
   ansible.builtin.import_tasks: compose.yml
 

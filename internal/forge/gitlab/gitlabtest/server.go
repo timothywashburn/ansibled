@@ -1,16 +1,12 @@
 // Package gitlabtest is an in-memory fake GitLab for tests. It implements
 // exactly the API v4 endpoints, pagination and path encoding the gitlab
-// adapter uses, the OAuth authorize/token endpoints, and it records the
-// writes (commit statuses, MR notes) for assertions.
+// adapter uses, and it records the writes (commit statuses, MR notes) for
+// assertions.
 //
-// API requests must carry "PRIVATE-TOKEN: <Token>" (401 otherwise); GET
-// /api/v4/user also accepts "Authorization: Bearer <oauth token>" issued by
-// the fake token endpoint.
+// API requests must carry "PRIVATE-TOKEN: <Token>" (401 otherwise).
 package gitlabtest
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,12 +22,8 @@ import (
 	"github.com/timothywashburn/ansibled/internal/forge"
 )
 
-// Credentials the fake accepts.
-const (
-	Token        = "glpat-fake-project-token"
-	ClientID     = "fake-oauth-client-id"
-	ClientSecret = "fake-oauth-client-secret"
-)
+// Token is the project access token the fake accepts.
+const Token = "glpat-fake-project-token"
 
 // Defaults before any setter is called.
 const (
@@ -83,15 +75,6 @@ type pushEvent struct {
 	at       time.Time
 }
 
-type oauthGrant struct {
-	code       string
-	user       forge.User
-	authorized bool
-	challenge  string
-	redirect   string
-	used       bool
-}
-
 type failure struct {
 	n      int
 	status int
@@ -113,8 +96,6 @@ type Server struct {
 	members       map[string][]forge.User
 	notes         map[int][]*note
 	statuses      []RecordedStatus
-	grants        []*oauthGrant
-	oauthTokens   map[string]forge.User
 	requests      []string
 	fail          failure
 	nextID        int64
@@ -150,7 +131,6 @@ func newServer() *Server {
 		branches:      map[string]string{},
 		members:       map[string][]forge.User{},
 		notes:         map[int][]*note{},
-		oauthTokens:   map[string]forge.User{},
 		nextID:        1,
 	}
 }
@@ -253,15 +233,6 @@ func (s *Server) SetBotUser(u forge.User) {
 	s.bot = u
 }
 
-// AddOAuthUser queues a sign-in: the next GET /oauth/authorize redirects to
-// redirect_uri?code=<code>&state=<state>, the token endpoint trades code for
-// a token, and GET /api/v4/user with that bearer token returns u.
-func (s *Server) AddOAuthUser(code string, u forge.User) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.grants = append(s.grants, &oauthGrant{code: code, user: u})
-}
-
 // AddNote adds a note to an MR as author u (e.g. a pre-existing comment) and
 // returns its id.
 func (s *Server) AddNote(iid int, u forge.User, body string) int64 {
@@ -359,10 +330,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.serveAPI(w, r, strings.TrimPrefix(esc, "/api/v4/"))
-	case esc == "/oauth/authorize":
-		s.serveAuthorize(w, r)
-	case esc == "/oauth/token":
-		s.serveToken(w, r)
 	default:
 		writeMessage(w, http.StatusNotFound, "404 Not Found")
 	}
@@ -392,12 +359,6 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request, rest string) {
 
 	// Authentication.
 	if r.Header.Get("PRIVATE-TOKEN") != Token {
-		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		u, known := s.oauthTokens[bearer]
-		if ok && known && r.Method == http.MethodGet && len(segs) == 1 && segs[0] == "user" {
-			writeJSON(w, http.StatusOK, s.userJSON(u))
-			return
-		}
 		writeMessage(w, http.StatusUnauthorized, "401 Unauthorized")
 		return
 	}
@@ -784,104 +745,6 @@ func (s *Server) serveNote(w http.ResponseWriter, r *http.Request, iid int, idSt
 	default:
 		writeMessage(w, http.StatusMethodNotAllowed, "405 Method Not Allowed")
 	}
-}
-
-// ---- OAuth ----
-
-func (s *Server) serveAuthorize(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	bad := func(msg string) { http.Error(w, msg, http.StatusBadRequest) }
-	switch {
-	case r.Method != http.MethodGet:
-		bad("method")
-	case q.Get("client_id") != ClientID:
-		bad("unknown client_id")
-	case q.Get("response_type") != "code":
-		bad("response_type must be code")
-	case q.Get("redirect_uri") == "":
-		bad("redirect_uri missing")
-	case q.Get("code_challenge") == "" || q.Get("code_challenge_method") != "S256":
-		bad("PKCE S256 code_challenge required")
-	case !slices.Contains(strings.Fields(q.Get("scope")), "read_user"):
-		bad("scope read_user required")
-	default:
-		for _, g := range s.grants {
-			if !g.authorized {
-				g.authorized, g.challenge, g.redirect = true, q.Get("code_challenge"), q.Get("redirect_uri")
-				u, err := url.Parse(g.redirect)
-				if err != nil {
-					bad("bad redirect_uri")
-					return
-				}
-				rq := u.Query()
-				rq.Set("code", g.code)
-				if st := q.Get("state"); st != "" {
-					rq.Set("state", st)
-				}
-				u.RawQuery = rq.Encode()
-				http.Redirect(w, r, u.String(), http.StatusFound)
-				return
-			}
-		}
-		bad("no pending OAuth user (call AddOAuthUser)")
-	}
-}
-
-func (s *Server) serveToken(w http.ResponseWriter, r *http.Request) {
-	oauthErr := func(status int, code, desc string) {
-		writeJSON(w, status, map[string]any{"error": code, "error_description": desc})
-	}
-	if r.Method != http.MethodPost {
-		oauthErr(http.StatusMethodNotAllowed, "invalid_request", "POST required")
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		oauthErr(http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	id, secret, ok := r.BasicAuth()
-	if !ok {
-		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
-	}
-	if id != ClientID || secret != ClientSecret {
-		oauthErr(http.StatusUnauthorized, "invalid_client", "Client authentication failed")
-		return
-	}
-	if r.PostForm.Get("grant_type") != "authorization_code" {
-		oauthErr(http.StatusBadRequest, "unsupported_grant_type", "only authorization_code")
-		return
-	}
-	var g *oauthGrant
-	for _, x := range s.grants {
-		if x.code == r.PostForm.Get("code") && !x.used {
-			g = x
-		}
-	}
-	invalid := func() {
-		oauthErr(http.StatusBadRequest, "invalid_grant", "The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client.")
-	}
-	if g == nil {
-		invalid()
-		return
-	}
-	if g.authorized {
-		if r.PostForm.Get("redirect_uri") != g.redirect {
-			invalid()
-			return
-		}
-		sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
-		if base64.RawURLEncoding.EncodeToString(sum[:]) != g.challenge {
-			invalid()
-			return
-		}
-	}
-	g.used = true
-	tok := fmt.Sprintf("fake-oauth-token-%d", s.id())
-	s.oauthTokens[tok] = g.user
-	writeJSON(w, http.StatusOK, map[string]any{
-		"access_token": tok, "token_type": "Bearer", "expires_in": 7200,
-		"refresh_token": tok + "-refresh", "scope": "read_user", "created_at": s.now().Unix(),
-	})
 }
 
 // ---- JSON shapes ----

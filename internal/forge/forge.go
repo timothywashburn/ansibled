@@ -114,14 +114,4 @@ type Forge interface {
 	GitAuth() (fetchURL, authHeader string)
 	// MRRef is the git ref holding an MR's head, e.g. "refs/merge-requests/7/head".
 	MRRef(iid int) string
-
-	OAuth() OAuthProvider
-}
-
-// OAuthProvider signs users in to the web UI.
-type OAuthProvider interface {
-	// AuthCodeURL builds the authorize URL. verifier is the PKCE code verifier.
-	AuthCodeURL(state, verifier, redirectURL string) string
-	// Exchange trades the code for a token and returns the signed-in user.
-	Exchange(ctx context.Context, code, verifier, redirectURL string) (User, error)
 }

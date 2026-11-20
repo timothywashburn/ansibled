@@ -289,18 +289,47 @@ Binding retries every 5 s until the address exists (it may be on an interface
 that comes up after the container, e.g. a VPN), instead of exiting.
 
 The log pages are server-rendered with `html/template`, no JavaScript needed.
-Login is **"Sign in with GitLab"** (OAuth authorization code flow with PKCE and
-`state`, scope `read_user`):
+Sign-in uses **generic OpenID Connect** (`internal/oidc`), so any provider works
+(authentik, Keycloak, Google, ...). It is independent of the forge: who may
+*read logs* is decided by the provider's groups claim (`web.oidc.allowed_groups`),
+who may *trigger runs* stays the forge's trusted group (see [Trust model](#trust-model)).
 
-1. `/login` → redirect to `<gitlab>/oauth/authorize`.
-2. `/oauth/callback` → exchange the code, `GET /api/v4/user` with the user's
-   token, check trusted-group membership with ansibled's own token, discard the
-   user token.
-3. Set a session cookie (HMAC-SHA256 signed with `web.session_key_file`, or a
-   random key per process if unset; `HttpOnly`, `SameSite=Lax`, `Secure` when
-   `public_url` is https), valid for 12 h.
+Discovery: `GET <issuer without trailing slash>/.well-known/openid-configuration`,
+on first use (not at startup, so a provider outage never stops the daemon), with a
+30 s timeout. A successful result is cached for the life of the process; a failure
+is not, the next sign-in retries. The document must have `authorization_endpoint`,
+`token_endpoint` and `userinfo_endpoint`, and its `issuer` must equal
+`web.oidc.issuer` (ignoring one trailing slash). A plain-http issuer is allowed
+(tests, labs) with a warning.
 
-Non-members get a 403 page. Expired runs (past retention) show "log expired".
+Flow (authorization code with PKCE `S256` and `state`, confidential client):
+
+1. `/login` → random `state` and PKCE verifier in a signed, 10-minute cookie →
+   redirect to the provider's `authorization_endpoint` with `response_type=code`,
+   `web.oidc.scopes`, the `code_challenge` and redirect URI
+   `<public_url>/oauth/callback`. If discovery fails: 502 "Could not reach the
+   sign-in provider."
+2. `/oauth/callback` → check `state`, exchange the code at the `token_endpoint`
+   (client secret via HTTP basic auth, with the `code_verifier`), then `GET
+   userinfo_endpoint` with `Authorization: Bearer <access token>`. All tokens are
+   discarded afterwards. ID tokens are **not** validated: ansibled trusts the
+   userinfo answer, which it fetched itself, server side, over the provider's TLS.
+   Exchange or userinfo failure: 502.
+3. From the userinfo claims: subject = `sub` (required), username =
+   `preferred_username`, else `email`, else `sub`; groups = the
+   `web.oidc.groups_claim` claim (default `groups`), a JSON array of strings
+   (non-strings ignored) or a single string, missing = none. A user in none of
+   `web.oidc.allowed_groups` (exact, case-sensitive match) gets a 403 page
+   "<username> is not in an allowed group (<allowed groups>)."
+4. Set a session cookie holding a payload version, the OIDC subject and the
+   username (HMAC-SHA256 signed with `web.session_key_file`, or a random key per
+   process if unset; `HttpOnly`, `SameSite=Lax`, `Secure` when `public_url` is
+   https), valid for 12 h. Cookies of another payload version (e.g. from the
+   GitLab sign-in era) are rejected. Group membership is checked at sign-in only.
+
+Cookie names include the site (`ansibled_session_<site>`, `ansibled_oauth_<site>`)
+so several instances on one host don't collide. Errors and logs never contain
+tokens or the client secret. Expired runs (past retention) show "log expired".
 
 ## Forge interface
 
@@ -320,7 +349,6 @@ type Forge interface {
     UpsertMRComment(ctx, iid int, marker, body string) error
     GitAuth() (fetchURL string, header string)       // HTTPS URL + Authorization header value
     MRRef(iid int) string                            // "refs/merge-requests/<iid>/head"
-    OAuth() OAuthProvider                            // login for the web UI
 }
 ```
 
@@ -339,7 +367,34 @@ GitLab endpoints used (API v4, project addressed by URL-encoded path):
   be ignored anyway). Verify with `ansibled check-config --online`.
 - **Webhook** to `http://<listen.webhook>/webhook/gitlab` with a secret token,
   events: push, merge request, comments. The deploy role can create it.
-- **OAuth application**, scope `read_user`, redirect URI `<public_url>/oauth/callback`.
+
+GitLab is not used for the web UI sign-in; see the next section.
+
+### OIDC provider setup
+
+Any OpenID Connect provider with discovery, the authorization code flow, PKCE,
+a userinfo endpoint and a groups claim works. With **authentik** as the example:
+
+1. *Applications → Providers → Create → OAuth2/OpenID Provider*:
+   - client type **Confidential**;
+   - redirect URI (strict) `<public_url>/oauth/callback`, e.g.
+     `http://10.0.0.1:8471/oauth/callback`;
+   - scopes: the default `openid`, `profile` and `email` mappings. authentik's
+     default *profile* scope mapping already puts the user's group names into a
+     `groups` claim, so `web.oidc.groups_claim` can stay at its default.
+2. *Applications → Create*, slug e.g. `ansibled`, with that provider. The issuer
+   is then `https://auth.example.org/application/o/ansibled/` (shown on the
+   provider page as "OpenID Configuration Issuer").
+3. Put the client id and client secret into the files named by
+   `web.oidc.client_id_file` / `client_secret_file` (the deploy role writes them
+   from `ansibled_oidc_client_id` / `ansibled_oidc_client_secret`), and list the
+   authentik groups that may read logs in `web.oidc.allowed_groups`.
+4. Verify with `ansibled check-config --online` (runs discovery).
+
+Other providers: Keycloak (issuer `https://<host>/realms/<realm>`; add a *Group
+Membership* mapper to the client with token claim name `groups`, *Full group path*
+off and *Add to userinfo* on). Providers without a groups claim (e.g. plain Google
+accounts) cannot be used, since access is decided by groups.
 
 ## Configuration
 
@@ -348,7 +403,7 @@ referenced by file path. Unknown keys are an error.
 
 ```yaml
 site: mysite                       # status name ansibled/<site>, comment marker
-public_url: http://10.0.0.1:8471    # base for links and the OAuth redirect
+public_url: http://10.0.0.1:8471    # base for links and the sign-in redirect (<public_url>/oauth/callback)
 
 listen:
   webhook: 10.0.0.1:8470
@@ -360,10 +415,7 @@ forge:
   project: myorg/infra              # path or numeric id
   token_file: /etc/ansibled/secrets/forge_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
-  trusted_group: myorg/sysadmins
-  oauth:
-    client_id_file: /etc/ansibled/secrets/oauth_client_id
-    client_secret_file: /etc/ansibled/secrets/oauth_client_secret
+  trusted_group: myorg/sysadmins     # who may trigger runs
 
 repo:
   workdir: ansible                  # ansible project dir relative to repo root ("." default)
@@ -392,13 +444,21 @@ retention: 720h                     # run logs; run records are kept
 web:
   metrics_token_file: /etc/ansibled/secrets/metrics_token
   session_key_file: /etc/ansibled/secrets/session_key   # optional
+  oidc:                                                  # web UI sign-in (who may read logs)
+    issuer: https://auth.example.org/application/o/ansibled/   # absolute http(s) URL
+    client_id_file: /etc/ansibled/secrets/oidc_client_id
+    client_secret_file: /etc/ansibled/secrets/oidc_client_secret
+    allowed_groups: [sysadmins]     # required, non-empty; a user must be in at least one
+    groups_claim: groups            # optional, default "groups"
+    scopes: [openid, profile, email]   # optional, default this; must include openid
 ```
 
 ## CLI
 
 - `ansibled serve [-config path]`: the daemon (default command).
-- `ansibled check-config [-config path] [--online]`: validate; `--online` also
-  checks the forge token, project, trusted-group visibility and SSH key readability.
+- `ansibled check-config [-config path] [--online]`: validate the config and read
+  every secret file (including the SSH key); `--online` also checks the forge
+  token, project and trusted-group visibility, and runs OIDC discovery.
 - `ansibled run-once [-config path] --sha <sha>|--branch <b>`: run the engine
   once in the foreground, print the summary, write nothing to the forge.
 
@@ -462,9 +522,10 @@ collections:
   `ansibled_public_key` for `ansibled_target`.
 - Renders `ansibled.yml` from `ansibled_config` (a dict merged over defaults).
 - Writes secrets from variables (`ansibled_forge_token`, `ansibled_webhook_secret`,
-  `ansibled_oauth_client_id`, `ansibled_oauth_client_secret`,
-  `ansibled_metrics_token`), generating the webhook secret and metrics token
-  if not given.
+  `ansibled_oidc_client_id`, `ansibled_oidc_client_secret`,
+  `ansibled_metrics_token`, `ansibled_session_key`), generating the webhook
+  secret, metrics token and session key if not given. The forge token and OIDC
+  client credentials are needed on the first deploy only.
 - Writes `ansibled_overlay_files` (list of `{path, content | src, mode}`).
 - Renders `compose.yml` (host networking, `restart: always`, `:Z` volume labels
   for SELinux) and brings it up with `community.docker.docker_compose_v2`.
@@ -488,7 +549,8 @@ collections:
 cmd/ansibled/            main, CLI
 internal/config/         load + validate
 internal/forge/          interface and types
-internal/forge/gitlab/   GitLab adapter (webhooks, API, OAuth)
+internal/forge/gitlab/   GitLab adapter (webhooks, API)
+internal/oidc/           OpenID Connect sign-in for the web UI (oidctest: fake provider)
 internal/store/          SQLite
 internal/queue/          queue, supersede, worker
 internal/engine/         fetch, checkout, overlay, setup, ansible, parse
@@ -511,12 +573,13 @@ Containerfile
   comment rendering.
 - Engine test against `testdata/sample-repo` (a tiny uv project plus a playbook
   that templates a file) running against an sshd container.
-- End-to-end with docker compose: ansibled + a fake GitLab (Go httptest server
-  recording API calls) + an sshd target.
+- End-to-end with docker: ansibled + a fake GitLab (Go httptest server
+  recording API calls) + a fake OpenID Connect provider (`oidctest`) + an sshd
+  target.
 
 ## Later
 
 - "What this MR changes compared with main": diff the MR run's changed tasks
   against the latest `main` run so existing drift drops out of MR reports.
 - Real applies (`mode: apply`), with reboot gating.
-- GitHub adapter (commit statuses with `context`, issue comments, team membership, GitHub OAuth).
+- GitHub adapter (commit statuses with `context`, issue comments, team membership).

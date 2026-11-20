@@ -3,10 +3,10 @@
 Roles for deploying [ansibled](https://github.com/timothywashburn/ansibled):
 
 - [`ansibled`](roles/ansibled/README.md): runs the daemon container on one host
-  (config, secrets, SSH key, overlay, Docker Compose, optional GitLab webhook and
-  firewalld).
+  (config, secrets, SSH key, overlay, Docker Compose, optional GitLab webhook).
+  Opening its ports in the host firewall is left to you.
 - [`ansibled_target`](roles/ansibled_target/README.md): prepares every managed host
-  (local user, SSH key with `from=`, passwordless sudo, SELinux context).
+  (local user, SSH key with `from=`, passwordless sudo).
 
 Requires ansible-core 2.15 or newer. Both roles validate their input
 (`meta/argument_specs.yml`) and support check mode, since ansibled dry-runs the
@@ -45,7 +45,9 @@ This also installs the dependencies `community.docker`, `community.general`,
           forge: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins}
           repo: {setup: uv sync --frozen --no-dev, venv_key_files: [pyproject.toml, uv.lock]}
           ansible: {inventory: inventories/mysite, playbooks: [site.yml], remote_user: ansibled}
-        # Secrets on the first deploy only, from a gitignored file:
+          # Web UI sign-in: any OpenID Connect provider; access by its groups claim.
+          web: {oidc: {issuer: "https://auth.example.org/application/o/ansibled/", allowed_groups: [sysadmins]}}
+        # Secrets (forge token, OIDC client id/secret) on the first deploy only, from a gitignored file:
         #   ansible-playbook site.yml -e @ansibled-secrets.yml
 
 - name: Hosts ansibled manages

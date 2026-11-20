@@ -49,6 +49,12 @@
             nightly: "0 4 * * *"
             timezone: America/Los_Angeles
           retention: 720h
+          web:
+            oidc:
+              issuer: https://auth.example.org/application/o/ansibled/
+              allowed_groups: [sysadmins]
+              groups_claim: groups
+              scopes: [openid, profile, email]
         ansibled_overlay_files: "{{ _overlay_sets[test_overlay_set | default('a')] }}"
         ansibled_overlay_prune: true
   post_tasks:

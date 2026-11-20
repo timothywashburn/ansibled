@@ -25,6 +25,7 @@
 #                     (community.docker/general/crypto, ansible.posix); otherwise
 #                     they are installed from Galaxy
 #   KEEP=1            leave the containers running for inspection
+#   ONLY=target       only test the ansibled_target role (no dind, no image build)
 #   WORK              work directory (default: a new temp dir)
 set -euo pipefail
 
@@ -33,6 +34,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 P=ansibled-roles-test
 WORK=${WORK:-$(mktemp -d "${TMPDIR:-/tmp}/$P.XXXXXX")}
 KEEP=${KEEP:-0}
+ONLY=${ONLY:-}
 FG_PORT=18080
 FG_TOKEN=test-hook-token
 
@@ -78,20 +80,22 @@ docker network create $P-net >/dev/null
 docker run -d --name $P-rocky9 --hostname rocky9 --network $P-net rockylinux/rockylinux:9 sleep infinity >/dev/null
 docker run -d --name $P-trixie --hostname trixie --network $P-net debian:trixie sleep infinity >/dev/null
 docker run -d --name $P-client --hostname client --network $P-net debian:trixie sleep infinity >/dev/null
-docker run -d --privileged --name $P-dind --hostname dind --network $P-net -e DOCKER_TLS_CERTDIR= docker:dind >/dev/null
+[ "$ONLY" = target ] || docker run -d --privileged --name $P-dind --hostname dind --network $P-net -e DOCKER_TLS_CERTDIR= docker:dind >/dev/null
 docker exec $P-rocky9 sh -c 'dnf -y -q install openssh-server sudo python3 >/dev/null && ssh-keygen -A >/dev/null && /usr/sbin/sshd' &
 docker exec $P-trixie sh -c 'apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server sudo python3 >/dev/null && mkdir -p /run/sshd && /usr/sbin/sshd' &
 docker exec $P-client sh -c 'apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-client >/dev/null && ssh-keygen -q -t ed25519 -N "" -f /root/k' &
-docker exec $P-dind sh -c 'apk add -q python3 openssh-keygen && for i in $(seq 60); do docker info >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1' &
+[ "$ONLY" = target ] || docker exec $P-dind sh -c 'apk add -q python3 openssh-keygen && for i in $(seq 60); do docker info >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1' &
 wait
 ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$P-$1"; }
-ROCKY_IP=$(ip rocky9); TRIXIE_IP=$(ip trixie); CLIENT_IP=$(ip client); DIND_IP=$(ip dind)
+ROCKY_IP=$(ip rocky9); TRIXIE_IP=$(ip trixie); CLIENT_IP=$(ip client); DIND_IP=$([ "$ONLY" = target ] || ip dind)
 CLIENT_KEY=$(docker exec $P-client cat /root/k.pub)
 echo "rocky9=$ROCKY_IP trixie=$TRIXIE_IP client=$CLIENT_IP dind=$DIND_IP"
 
+if [ "$ONLY" != target ]; then
 step "ansibled image (Containerfile) -> dind"
 docker build -q -f "$REPO/Containerfile" -t $P-image:dev "$REPO" >/dev/null
 docker save $P-image:dev | docker exec -i $P-dind docker load
+fi
 
 # ------------------------------------------------------------------ helpers
 play() {
@@ -151,13 +155,13 @@ done
 pass "home/.ssh/authorized_keys/sudoers modes, shell, locked password"
 
 docker exec $P-trixie sh -c 'echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK stray" >> /var/lib/ansibled/.ssh/authorized_keys'
-play "$TARGET" -e "{\"test_pubkey\":[\"$CLIENT_KEY\"]}" -e "$FROM" -l "$P-trixie"
-assert_ok "list input"
+play "$TARGET" -e "test_pubkey='$CLIENT_KEY'" -e "$FROM" -l "$P-trixie"
+assert_ok "re-apply after a stray key was added"
 docker exec $P-trixie grep -q stray /var/lib/ansibled/.ssh/authorized_keys && fail "stray key not removed"
 pass "authorized_keys is exclusive"
 
-play "$TARGET" -e '{"test_pubkey":"command=\"x\" ssh-ed25519 AAAA x"}' -l "$P-trixie" --check
-assert_failed_with "key with options is rejected" "without options"
+play "$TARGET" -e "test_pubkey=''" -l "$P-trixie" --check
+assert_failed_with "missing key is rejected" "ansibled_target_public_key is required"
 play "$TARGET" -e "test_pubkey='$CLIENT_KEY'" -e test_state=bogus -l "$P-trixie" --check
 assert_failed_with "bad state is rejected by argument_specs" "Validation of arguments failed"
 
@@ -171,6 +175,8 @@ for h in rocky9 trixie; do
   docker exec $P-$h sh -c 'getent passwd ansibled || getent group ansibled || test -e /var/lib/ansibled || test -e /etc/sudoers.d/ansibled' && fail "$h: leftovers after absent"
 done
 pass "user, group, home and sudoers removed"
+
+[ "$ONLY" = target ] && { echo; echo "ONLY=target: done"; exit 0; }
 
 # ----------------------------------------------------------------- ansibled
 step "ansibled"
@@ -204,8 +210,8 @@ want='755 0:0 .
 700 10001:10001 ./etc/secrets
 400 10001:10001 ./etc/secrets/forge_token
 400 10001:10001 ./etc/secrets/metrics_token
-400 10001:10001 ./etc/secrets/oauth_client_id
-400 10001:10001 ./etc/secrets/oauth_client_secret
+400 10001:10001 ./etc/secrets/oidc_client_id
+400 10001:10001 ./etc/secrets/oidc_client_secret
 400 10001:10001 ./etc/secrets/session_key
 400 10001:10001 ./etc/secrets/ssh_key
 400 10001:10001 ./etc/secrets/ssh_key.pub
@@ -249,8 +255,16 @@ assert_ok "fresh host without secrets, check mode"
 grep -q "WARNING: ansibled_forge_token is undefined" "$WORK/last.log" || fail "no check-mode warning"
 pass "check mode only warns about the missing secrets"
 
-play "${DAEMON[@]}" --check -e '{"ansibled_config":{"site":"x","public_url":"http://a:1","listen":{"webhook":"a:1","web":"a:2"},"forge":{"url":"http://g","project":"p","trusted_group":"g","token_file":"/x"},"repo":{"setup":"s","venv_key_files":["a"]},"ansible":{"inventory":"i","playbooks":["p"]}}}'
-assert_failed_with "role-managed key in ansibled_config is rejected" "forge.token_file"
+CFG_BASE='"site":"x","public_url":"http://a:1","listen":{"webhook":"a:1","web":"a:2"},"repo":{"setup":"s","venv_key_files":["a"]},"ansible":{"inventory":"i","playbooks":["p"]}'
+OIDC_OK='"oidc":{"issuer":"https://auth.example.org/","allowed_groups":["sysadmins"]}'
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\",\"token_file\":\"/x\"},\"web\":{$OIDC_OK}}}"
+assert_failed_with "role-managed key in ansibled_config is rejected" "token_file"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"client_secret_file\":\"/x\"}}}}"
+assert_failed_with "role-managed web.oidc key is rejected" "client_secret_file"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"}}}"
+assert_failed_with "missing web.oidc is rejected" "missing required arguments: web"
+play "${DAEMON[@]}" --check -e "{\"ansibled_config\":{$CFG_BASE,\"forge\":{\"url\":\"http://g\",\"project\":\"p\",\"trusted_group\":\"g\"},\"web\":{\"oidc\":{\"issuer\":\"https://auth.example.org/\",\"allowed_groups\":[\"sysadmins\"],\"scopes\":[\"profile\"]}}}}"
+assert_failed_with "web.oidc.scopes without openid is rejected" "must include openid"
 play "${DAEMON[@]}" --check -e '{"ansibled_overlay_files":[{"path":"ansible/../../x","content":"do-not-print-me"}]}'
 assert_failed_with "overlay path escaping the repo is rejected" "stays inside the repo"
 grep -q do-not-print-me "$WORK/last.log" && fail "overlay content was printed"

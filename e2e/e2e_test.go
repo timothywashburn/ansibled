@@ -1,13 +1,14 @@
 // Package e2e is ansibled's end-to-end test: the real container image, a fake
-// GitLab (internal/forge/gitlab/gitlabtest) on the host, a bare git repo
-// mounted into the container and an sshd container as the managed host.
+// GitLab (internal/forge/gitlab/gitlabtest) and a fake OpenID Connect
+// provider (internal/oidc/oidctest) on the host, a bare git repo mounted into
+// the container and an sshd container as the managed host.
 //
 // It is opt-in because it needs docker and network access (uv, PyPI, Galaxy):
 //
 //	ANSIBLED_E2E=1 go test -v -timeout 30m ./e2e/
 //
-// It is written for Docker Desktop (the container reaches the host's fake
-// GitLab as host.docker.internal). Everything it creates in docker is named
+// It is written for Docker Desktop (the container reaches the host's fakes
+// as host.docker.internal). Everything it creates in docker is named
 // ansibled-e2e* and removed afterwards, including base images it pulled.
 package e2e
 
@@ -26,18 +27,21 @@ import (
 
 	"github.com/timothywashburn/ansibled/internal/forge"
 	"github.com/timothywashburn/ansibled/internal/forge/gitlab/gitlabtest"
+	"github.com/timothywashburn/ansibled/internal/oidc/oidctest"
 )
 
 // suite is the shared state of the scenarios, which run in order.
 type suite struct {
 	t    *testing.T
 	fake *gitlabtest.Server
+	idp  *oidctest.Server
 	repo *gitRepo
 
 	cfgDir     string
 	webURL     string // public_url
 	webhookURL string
 	forgeURL   string // as the container sees it
+	issuer     string // OIDC issuer, as the container (and the browser) sees it
 	runArgs    []string
 
 	main, feature string // M and F
@@ -157,11 +161,21 @@ func (s *suite) setup() {
 	g.pushMR("feature", mrIID, s.feature)
 	s.head = s.feature
 
-	// Fake GitLab on the host, reachable from the container.
+	// Fake GitLab and OIDC provider on the host, reachable from the container.
 	listenAddr := "127.0.0.1:0" // Docker Desktop forwards host.docker.internal to the host's loopback
 	if runtime.GOOS == "linux" {
 		listenAddr = "0.0.0.0:0" // reached through the host-gateway address
 	}
+	il, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.idp = oidctest.NewWithListener(il)
+	t.Cleanup(s.idp.Close)
+	// authentik-style issuer with a path and a trailing slash.
+	s.issuer = fmt.Sprintf("http://%s:%d/application/o/ansibled/", hostAlias, il.Addr().(*net.TCPAddr).Port)
+	s.idp.SetIssuer(s.issuer)
+
 	l, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +198,7 @@ func (s *suite) setup() {
 	sec := filepath.Join(s.cfgDir, "secrets")
 	for name, v := range map[string]string{
 		"forge_token": gitlabtest.Token, "webhook_secret": webhookSecret,
-		"oauth_client_id": gitlabtest.ClientID, "oauth_client_secret": gitlabtest.ClientSecret,
+		"oidc_client_id": oidctest.ClientID, "oidc_client_secret": oidctest.ClientSecret,
 		"metrics_token": metricsToken, "session_key": sessionKey,
 	} {
 		writeFile(t, filepath.Join(sec, name), v+"\n", 0o600)
@@ -206,6 +220,9 @@ func (s *suite) setup() {
 		out, err := dockerOut(slices.Concat([]string{"run", "--rm"}, s.runArgs, []string{daemonImage}, args)...)
 		if err != nil {
 			t.Fatalf("ansibled %v: %v\n%s", args, err, out)
+		}
+		if len(args) == 2 && !strings.Contains(out, "OIDC provider discovery: ok") {
+			t.Fatalf("ansibled %v did not check OIDC discovery:\n%s", args, out)
 		}
 		t.Logf("ansibled %v: %s", args, out)
 	}
@@ -232,9 +249,6 @@ forge:
   token_file: /etc/ansibled/secrets/forge_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
   trusted_group: %s
-  oauth:
-    client_id_file: /etc/ansibled/secrets/oauth_client_id
-    client_secret_file: /etc/ansibled/secrets/oauth_client_secret
   clone_url: %s
 repo:
   workdir: .
@@ -256,7 +270,12 @@ retention: 720h
 web:
   metrics_token_file: /etc/ansibled/secrets/metrics_token
   session_key_file: /etc/ansibled/secrets/session_key
-`, site, s.webURL, s.forgeURL, gitlabtest.DefaultProjectPath, trustedGroup, containerGit, targetName)
+  oidc:
+    issuer: %s
+    client_id_file: /etc/ansibled/secrets/oidc_client_id
+    client_secret_file: /etc/ansibled/secrets/oidc_client_secret
+    allowed_groups: [sysadmins]
+`, site, s.webURL, s.forgeURL, gitlabtest.DefaultProjectPath, trustedGroup, containerGit, targetName, s.issuer)
 }
 
 func (s *suite) waitHealthy() {
@@ -579,7 +598,7 @@ func (s *suite) metrics(t *testing.T) {
 	}
 }
 
-// h: the log pages need "Sign in with GitLab"; only trusted users get in.
+// h: the log pages need OIDC sign-in; only members of an allowed group get in.
 func (s *suite) webUI(t *testing.T) {
 	r := get(t, newClient(false), s.webURL+"/runs")
 	if r.Status != http.StatusFound || !strings.HasPrefix(r.Header.Get("Location"), "/login") {
@@ -587,7 +606,10 @@ func (s *suite) webUI(t *testing.T) {
 	}
 
 	browser := newClient(true)
-	s.fake.AddOAuthUser("code-alice", alice)
+	s.idp.AddUser("code-alice", map[string]any{
+		"sub": "alice-subject-0001", "preferred_username": "alice", "email": "alice@example.org",
+		"groups": []any{"sysadmins"},
+	})
 	r = get(t, browser, s.webURL+"/login")
 	if r.Status != http.StatusOK || !strings.HasSuffix(r.URL, "/runs") {
 		t.Fatalf("sign-in as alice ended at %s with %d:\n%s", r.URL, r.Status, r.Body)
@@ -596,6 +618,10 @@ func (s *suite) webUI(t *testing.T) {
 		t.Errorf("no session cookie after sign-in")
 	}
 	s.alice = browser
+	// The daemon (in the container) exchanged the code and read userinfo.
+	if n, m := s.idp.CountRequests(oidctest.Token), s.idp.CountRequests(oidctest.Userinfo); n != 1 || m != 1 {
+		t.Errorf("provider saw %d token and %d userinfo requests, want 1 each", n, m)
+	}
 	for _, id := range []int64{s.mainRunID, s.lastRunID} {
 		if !strings.Contains(r.Body, fmt.Sprintf(`href="/runs/%d"`, id)) {
 			t.Errorf("/runs does not list run %d", id)
@@ -627,11 +653,13 @@ func (s *suite) webUI(t *testing.T) {
 		t.Errorf("/runs/999999: %d", r.Status)
 	}
 
-	// bob signs in at GitLab but is not in the trusted group.
+	// bob signs in at the provider but is not in an allowed group.
 	bobBrowser := newClient(true)
-	s.fake.AddOAuthUser("code-bob", bob)
+	s.idp.AddUser("code-bob", map[string]any{
+		"sub": "bob-subject-0002", "preferred_username": "bob", "groups": []any{"users"},
+	})
 	r = get(t, bobBrowser, s.webURL+"/login")
-	if r.Status != http.StatusForbidden || !strings.Contains(r.Body, "not a member") {
+	if r.Status != http.StatusForbidden || !strings.Contains(r.Body, "bob is not in an allowed group (sysadmins).") {
 		t.Errorf("bob: %d at %s:\n%s", r.Status, r.URL, r.Body)
 	}
 	if r := get(t, newClientWithJar(bobBrowser), s.webURL+"/runs"); r.Status != http.StatusFound {

@@ -1,9 +1,0 @@
----
-- name: Open the listen ports
-  ansible.posix.firewalld:
-    port: "{{ item }}/tcp"
-    zone: "{{ ansibled_firewalld_zone }}"
-    permanent: true
-    immediate: true
-    state: enabled
-  loop: "{{ [_ansibled_webhook_port, _ansibled_web_port] | unique }}"

@@ -14,10 +14,7 @@ forge:
   project: myorg/infra
   token_file: /etc/ansibled/secrets/forge_token
   webhook_secret_file: /etc/ansibled/secrets/webhook_secret
-  trusted_group: myorg/sysadmins
-  oauth:
-    client_id_file: /etc/ansibled/secrets/oauth_client_id
-    client_secret_file: /etc/ansibled/secrets/oauth_client_secret
+  trusted_group: myorg/sysadmins   # who may trigger runs
 
 repo:
   workdir: .
@@ -50,3 +47,12 @@ retention: 720h
 web:
   metrics_token_file: /etc/ansibled/secrets/metrics_token
   session_key_file: /etc/ansibled/secrets/session_key
+  # Web UI sign-in with any OpenID Connect provider (authentik, Keycloak, ...).
+  # Redirect URI to register at the provider: <public_url>/oauth/callback
+  oidc:
+    issuer: https://auth.example.org/application/o/ansibled/
+    client_id_file: /etc/ansibled/secrets/oidc_client_id
+    client_secret_file: /etc/ansibled/secrets/oidc_client_secret
+    allowed_groups: [sysadmins]          # who may read the logs
+    # groups_claim: groups               # default
+    # scopes: [openid, profile, email]   # default; must include openid

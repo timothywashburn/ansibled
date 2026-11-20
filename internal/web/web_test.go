@@ -22,19 +22,14 @@ import (
 	"github.com/timothywashburn/ansibled/internal/forge"
 	"github.com/timothywashburn/ansibled/internal/metrics"
 	"github.com/timothywashburn/ansibled/internal/model"
+	"github.com/timothywashburn/ansibled/internal/oidc"
+	"github.com/timothywashburn/ansibled/internal/oidc/oidctest"
 )
 
 // fakeForge implements forge.Forge with just enough behaviour for the web tests.
 type fakeForge struct {
-	mu          sync.Mutex
-	webhookErr  error
-	events      []forge.Event
-	user        forge.User
-	exchangeErr error
-	trusted     bool
-	trustErr    error
-	// recorded Exchange arguments
-	code, verifier, redirect string
+	webhookErr error
+	events     []forge.Event
 }
 
 func (f *fakeForge) Name() string { return "fake" }
@@ -50,28 +45,35 @@ func (f *fakeForge) GetMR(context.Context, int) (forge.MR, error)             { 
 func (f *fakeForge) PusherOf(context.Context, string, string) (*forge.User, error) {
 	return nil, nil
 }
-func (f *fakeForge) IsTrusted(_ context.Context, u forge.User) (bool, error) {
-	return f.trusted && u.ID == f.user.ID, f.trustErr
+func (f *fakeForge) IsTrusted(context.Context, forge.User) (bool, error) {
+	panic("the web UI must not use the forge's trusted group")
 }
 func (f *fakeForge) BotUser(context.Context) (forge.User, error)                { return forge.User{}, nil }
 func (f *fakeForge) SetStatus(context.Context, string, forge.Status) error      { return nil }
 func (f *fakeForge) UpsertMRComment(context.Context, int, string, string) error { return nil }
 func (f *fakeForge) GitAuth() (string, string)                                  { return "", "" }
 func (f *fakeForge) MRRef(iid int) string                                       { return fmt.Sprintf("refs/merge-requests/%d/head", iid) }
-func (f *fakeForge) OAuth() forge.OAuthProvider                                 { return (*fakeOAuth)(f) }
 
-type fakeOAuth fakeForge
-
-func (o *fakeOAuth) AuthCodeURL(state, verifier, redirectURL string) string {
-	v := url.Values{"state": {state}, "code_challenge_src": {verifier}, "redirect_uri": {redirectURL}}
-	return "https://forge.example/oauth/authorize?" + v.Encode()
+// fakeSignIn implements SignIn.
+type fakeSignIn struct {
+	mu       sync.Mutex
+	id       oidc.Identity
+	urlErr   error
+	loginErr error
+	// recorded Login arguments
+	code, verifier, redirect string
 }
 
-func (o *fakeOAuth) Exchange(_ context.Context, code, verifier, redirectURL string) (forge.User, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.code, o.verifier, o.redirect = code, verifier, redirectURL
-	return o.user, o.exchangeErr
+func (f *fakeSignIn) AuthCodeURL(state, verifier, redirectURL string) (string, error) {
+	v := url.Values{"state": {state}, "code_challenge_src": {verifier}, "redirect_uri": {redirectURL}}
+	return "https://idp.example/authorize?" + v.Encode(), f.urlErr
+}
+
+func (f *fakeSignIn) Login(_ context.Context, code, verifier, redirectURL string) (oidc.Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.code, f.verifier, f.redirect = code, verifier, redirectURL
+	return f.id, f.loginErr
 }
 
 // fakeRuns is a RunSource over a slice, newest first.
@@ -118,6 +120,7 @@ type env struct {
 	s      *Server
 	h      http.Handler
 	forge  *fakeForge
+	signIn *fakeSignIn
 	runs   *fakeRuns
 	logDir string
 	logs   *syncBuf
@@ -129,7 +132,8 @@ const metricsToken = "test-metrics-token"
 func newEnv(t *testing.T, mod func(*Options)) *env {
 	t.Helper()
 	e := &env{
-		forge:  &fakeForge{user: forge.User{ID: 7, Username: "alice"}, trusted: true},
+		forge:  &fakeForge{},
+		signIn: &fakeSignIn{id: oidc.Identity{Subject: "sub-7", Username: "alice", Groups: []string{"sysadmins"}, Allowed: true}},
 		runs:   &fakeRuns{},
 		logDir: t.TempDir(),
 		logs:   &syncBuf{},
@@ -141,8 +145,10 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 			Listen:   config.Listen{Webhook: "127.0.0.1:0", Web: "127.0.0.1:0"},
 			Forge:    config.Forge{TrustedGroup: "example/admins"},
 			Schedule: config.Schedule{Timezone: "UTC"},
+			Web:      config.Web{OIDC: config.OIDC{AllowedGroups: []string{"sysadmins", "ops"}}},
 		},
 		Forge:        e.forge,
+		SignIn:       e.signIn,
 		Runs:         e.runs,
 		LogPath:      func(id int64) string { return filepath.Join(e.logDir, fmt.Sprint(id), "log.txt") },
 		Metrics:      metrics.New(),
@@ -196,7 +202,7 @@ func cookie(r *http.Response, name string) *http.Cookie {
 	return nil
 }
 
-// startLogin runs /login and returns the oauth cookie and the state sent to the forge.
+// startLogin runs /login and returns the oauth cookie and the state sent to the provider.
 func (e *env) startLogin(t *testing.T, next string) (*http.Cookie, url.Values) {
 	t.Helper()
 	res := e.do(t, "GET", "/login?next="+url.QueryEscape(next), nil, nil)
@@ -204,7 +210,7 @@ func (e *env) startLogin(t *testing.T, next string) (*http.Cookie, url.Values) {
 		t.Fatalf("/login status %d", res.StatusCode)
 	}
 	loc, err := url.Parse(res.Header.Get("Location"))
-	if err != nil || loc.Host != "forge.example" {
+	if err != nil || loc.Host != "idp.example" {
 		t.Fatalf("/login Location = %q", res.Header.Get("Location"))
 	}
 	c := cookie(res, "ansibled_oauth_lab")
@@ -341,8 +347,8 @@ func TestLoginSuccess(t *testing.T) {
 	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/runs/5" {
 		t.Fatalf("callback: %d -> %q", res.StatusCode, res.Header.Get("Location"))
 	}
-	if e.forge.code != "c0de" || e.forge.verifier != q.Get("code_challenge_src") || e.forge.redirect != q.Get("redirect_uri") {
-		t.Errorf("Exchange got code=%q verifier=%q redirect=%q", e.forge.code, e.forge.verifier, e.forge.redirect)
+	if e.signIn.code != "c0de" || e.signIn.verifier != q.Get("code_challenge_src") || e.signIn.redirect != q.Get("redirect_uri") {
+		t.Errorf("Login got code=%q verifier=%q redirect=%q", e.signIn.code, e.signIn.verifier, e.signIn.redirect)
 	}
 	sc := cookie(res, "ansibled_session_lab")
 	if sc == nil || !sc.HttpOnly || sc.SameSite != http.SameSiteLaxMode || sc.Path != "/" || sc.Secure || sc.MaxAge != 12*3600 {
@@ -356,6 +362,74 @@ func TestLoginSuccess(t *testing.T) {
 	res = e.do(t, "GET", "/runs", nil, nil, sc)
 	if body := readBody(t, res); res.StatusCode != 200 || !strings.Contains(body, "alice") || !strings.Contains(body, "lab") {
 		t.Errorf("/runs with session: %d", res.StatusCode)
+	}
+}
+
+func TestNewRequiresSignIn(t *testing.T) {
+	_, err := New(Options{Config: &config.Config{}, Forge: &fakeForge{}, Runs: &fakeRuns{}, LogPath: func(int64) string { return "" }})
+	if err == nil || !strings.Contains(err.Error(), "SignIn") {
+		t.Errorf("New without SignIn: %v", err)
+	}
+}
+
+// TestSignInWithOIDCProvider runs the real *oidc.Provider against oidctest.
+func TestSignInWithOIDCProvider(t *testing.T) {
+	idp := oidctest.New()
+	defer idp.Close()
+	idp.SetIssuer(idp.URL() + "/application/o/ansibled/")
+	p, err := oidc.New(oidc.Options{
+		Issuer: idp.Issuer(), ClientID: oidctest.ClientID, ClientSecret: oidctest.ClientSecret,
+		AllowedGroups: []string{"sysadmins"}, HTTPClient: idp.Client(), Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, func(o *Options) { o.SignIn = p; o.Config.Web.OIDC.AllowedGroups = []string{"sysadmins"} })
+	browser := *idp.Client()
+	browser.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	signIn := func(code string, claims map[string]any) *http.Response {
+		t.Helper()
+		idp.AddUser(code, claims)
+		res := e.do(t, "GET", "/login?next=/runs/3", nil, nil)
+		if res.StatusCode != http.StatusFound || !strings.HasPrefix(res.Header.Get("Location"), idp.URL()+"/application/o/ansibled/authorize?") {
+			t.Fatalf("/login: %d %q", res.StatusCode, res.Header.Get("Location"))
+		}
+		oc := cookie(res, "ansibled_oauth_lab")
+		ar, err := browser.Get(res.Header.Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ar.Body.Close()
+		cb, err := url.Parse(ar.Header.Get("Location"))
+		if ar.StatusCode != http.StatusFound || err != nil || cb.Path != "/oauth/callback" {
+			t.Fatalf("authorize: %d %q", ar.StatusCode, ar.Header.Get("Location"))
+		}
+		return e.do(t, "GET", cb.RequestURI(), nil, nil, oc)
+	}
+
+	res := signIn("code-alice", map[string]any{"sub": "a1", "preferred_username": "alice", "groups": []any{"sysadmins"}})
+	sc := cookie(res, "ansibled_session_lab")
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/runs/3" || sc == nil {
+		t.Fatalf("alice: %d %q", res.StatusCode, res.Header.Get("Location"))
+	}
+	if body := readBody(t, e.do(t, "GET", "/runs", nil, nil, sc)); !strings.Contains(body, "alice") {
+		t.Error("/runs does not show alice")
+	}
+
+	res = signIn("code-bob", map[string]any{"sub": "b1", "preferred_username": "bob", "groups": "users"})
+	if body := readBody(t, res); res.StatusCode != 403 || !strings.Contains(body, "bob is not in an allowed group (sysadmins).") ||
+		cookie(res, "ansibled_session_lab") != nil {
+		t.Errorf("bob: %d %s", res.StatusCode, body)
+	}
+
+	// Discovery failure on a fresh provider -> 502 at /login.
+	idp.FailNext(oidctest.Discovery, 1, 500)
+	p2, _ := oidc.New(oidc.Options{Issuer: idp.Issuer(), ClientID: oidctest.ClientID, ClientSecret: oidctest.ClientSecret,
+		AllowedGroups: []string{"sysadmins"}, HTTPClient: idp.Client(), Logger: slog.New(slog.DiscardHandler)})
+	e2 := newEnv(t, func(o *Options) { o.SignIn = p2 })
+	if res := e2.do(t, "GET", "/login", nil, nil); res.StatusCode != http.StatusBadGateway {
+		t.Errorf("/login with failing discovery: %d", res.StatusCode)
 	}
 }
 
@@ -382,8 +456,8 @@ func TestLoginFailures(t *testing.T) {
 		if res.StatusCode != 400 || cookie(res, "ansibled_session_lab") != nil {
 			t.Errorf("status %d", res.StatusCode)
 		}
-		if e.forge.code != "" {
-			t.Error("Exchange called despite state mismatch")
+		if e.signIn.code != "" {
+			t.Error("Login called despite state mismatch")
 		}
 	})
 	t.Run("no oauth cookie", func(t *testing.T) {
@@ -403,22 +477,42 @@ func TestLoginFailures(t *testing.T) {
 			t.Errorf("status %d", res.StatusCode)
 		}
 	})
-	t.Run("untrusted", func(t *testing.T) {
+	t.Run("not in an allowed group", func(t *testing.T) {
 		e := newEnv(t, nil)
-		e.forge.trusted = false
+		e.signIn.id = oidc.Identity{Subject: "sub-8", Username: "bob", Groups: []string{"users"}, Allowed: false}
 		oc, q := e.startLogin(t, "/runs")
 		res := e.do(t, "GET", "/oauth/callback?code=x&state="+q.Get("state"), nil, nil, oc)
 		body := readBody(t, res)
-		if res.StatusCode != 403 || cookie(res, "ansibled_session_lab") != nil || !strings.Contains(body, "example/admins") {
+		if res.StatusCode != 403 || cookie(res, "ansibled_session_lab") != nil ||
+			!strings.Contains(body, "bob is not in an allowed group (sysadmins, ops).") {
 			t.Errorf("status %d body %s", res.StatusCode, body)
 		}
 	})
-	t.Run("exchange error", func(t *testing.T) {
+	t.Run("login error", func(t *testing.T) {
 		e := newEnv(t, nil)
-		e.forge.exchangeErr = errors.New("boom")
+		e.signIn.loginErr = errors.New("boom")
 		oc, q := e.startLogin(t, "/runs")
 		res := e.do(t, "GET", "/oauth/callback?code=x&state="+q.Get("state"), nil, nil, oc)
-		if res.StatusCode != 502 || cookie(res, "ansibled_session_lab") != nil {
+		body := readBody(t, res)
+		if res.StatusCode != 502 || cookie(res, "ansibled_session_lab") != nil || strings.Contains(body, "boom") {
+			t.Errorf("status %d body %s", res.StatusCode, body)
+		}
+	})
+	t.Run("provider unreachable", func(t *testing.T) {
+		e := newEnv(t, nil)
+		e.signIn.urlErr = errors.New("oidc: discovery: connection refused")
+		res := e.do(t, "GET", "/login?next=/runs", nil, nil)
+		body := readBody(t, res)
+		if res.StatusCode != 502 || !strings.Contains(body, "Could not reach the sign-in provider.") ||
+			strings.Contains(body, "connection refused") || cookie(res, "ansibled_oauth_lab") != nil {
+			t.Errorf("status %d body %s", res.StatusCode, body)
+		}
+	})
+	t.Run("provider error param", func(t *testing.T) {
+		e := newEnv(t, nil)
+		oc, q := e.startLogin(t, "/runs")
+		res := e.do(t, "GET", "/oauth/callback?error=access_denied&state="+q.Get("state"), nil, nil, oc)
+		if res.StatusCode != 403 || cookie(res, "ansibled_session_lab") != nil || e.signIn.code != "" {
 			t.Errorf("status %d", res.StatusCode)
 		}
 	})
@@ -439,7 +533,7 @@ func TestSessionRejected(t *testing.T) {
 
 	// Tampered payload: change the username, keep the MAC.
 	p, mac, _ := strings.Cut(good.Value, ".")
-	forgedPayload, _ := e.s.sign("x", session{UserID: 1, Username: "mallory", Expires: time.Now().Add(time.Hour).Unix()})
+	forgedPayload, _ := e.s.sign("x", session{Version: sessionVersion, Subject: "1", Username: "mallory", Expires: time.Now().Add(time.Hour).Unix()})
 	fp, _, _ := strings.Cut(forgedPayload, ".")
 	redirected("tampered payload", &http.Cookie{Name: good.Name, Value: fp + "." + mac})
 	redirected("tampered mac", &http.Cookie{Name: good.Name, Value: p + ".AAAA"})
@@ -448,6 +542,20 @@ func TestSessionRejected(t *testing.T) {
 	// Signed with another key.
 	other := newEnv(t, func(o *Options) { o.SessionKey = []byte("another-key-another-key-another!!") })
 	redirected("other key", other.login(t))
+
+	// Correctly signed cookies from before OIDC (GitLab user ids, no
+	// version) or with another version are rejected.
+	exp := time.Now().Add(time.Hour).Unix()
+	gitlabEra, _ := e.s.sign(good.Name, map[string]any{"uid": 7, "user": "alice", "exp": exp})
+	redirected("GitLab-era cookie", &http.Cookie{Name: good.Name, Value: gitlabEra})
+	v1, _ := e.s.sign(good.Name, session{Version: 1, Subject: "sub-7", Username: "alice", Expires: exp})
+	redirected("version 1 cookie", &http.Cookie{Name: good.Name, Value: v1})
+	noSub, _ := e.s.sign(good.Name, session{Version: sessionVersion, Username: "alice", Expires: exp})
+	redirected("cookie without subject", &http.Cookie{Name: good.Name, Value: noSub})
+	current, _ := e.s.sign(good.Name, session{Version: sessionVersion, Subject: "sub-7", Username: "alice", Expires: exp})
+	if res := e.do(t, "GET", "/runs", nil, nil, &http.Cookie{Name: good.Name, Value: current}); res.StatusCode != 200 {
+		t.Errorf("hand-made current cookie: %d", res.StatusCode)
+	}
 
 	// An oauth cookie cannot be used as a session cookie.
 	oc, _ := e.startLogin(t, "/runs")

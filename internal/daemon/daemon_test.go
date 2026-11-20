@@ -86,7 +86,6 @@ func newFixture(t *testing.T, gate bool) *fixture {
 	client, err := gitlab.New(gitlab.Options{
 		BaseURL: gl.URL(), Project: "myorg/infra", Token: gitlabtest.Token,
 		WebhookSecret: secret, TrustedGroup: group, HTTPClient: gl.Client(),
-		OAuthClientID: gitlabtest.ClientID, OAuthClientSecret: gitlabtest.ClientSecret,
 	})
 	if err != nil {
 		t.Fatal(err)
