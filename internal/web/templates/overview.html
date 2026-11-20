@@ -1,0 +1,90 @@
+{{define "content" -}}
+<div class="pagehead"><h1>Overview</h1></div>
+<div id="live" data-live="5000">
+{{template "overview-live" .}}
+</div>
+{{- end}}
+
+{{define "overview-live" -}}
+<div class="tiles">
+  <a class="tile" href="{{if .LatestMain}}/runs/{{.LatestMain.ID}}{{else}}/runs?kind=main{{end}}">
+    <span class="tile-label">{{icon "branch"}} Main</span>
+    {{- with .LatestMain}}
+    <span class="tile-value">{{template "badge" .State}}</span>
+    <span class="tile-sub"><span class="mono">{{.SHA}}</span> · {{template "time" .FinishedISO}}</span>
+    {{- else}}<span class="tile-value muted">no run yet</span>{{end}}
+  </a>
+  <a class="tile" href="{{if .LatestNightly}}/runs/{{.LatestNightly.ID}}{{else}}/runs?kind=nightly{{end}}">
+    <span class="tile-label">{{icon "clock"}} Last nightly</span>
+    {{- with .LatestNightly}}
+    <span class="tile-value">{{template "badge" .State}}</span>
+    <span class="tile-sub">{{template "time" .FinishedISO}}</span>
+    {{- else}}<span class="tile-value muted">no run yet</span>{{end}}
+  </a>
+  <div class="tile">
+    <span class="tile-label">{{icon "host"}} Drift</span>
+    {{- if .DriftFrom}}
+    <span class="tile-value"><span class="big{{if .HostsDrifted}} warn{{else}} ok{{end}}">{{.HostsDrifted}}</span><span class="muted"> / {{.HostsTotal}} hosts</span></span>
+    <span class="tile-sub">{{if .HostsFailed}}<span class="bad">{{.HostsFailed}} failed</span> · {{end}}{{if .HostsDown}}<span class="bad">{{.HostsDown}} unreachable</span>{{else}}all reachable{{end}}</span>
+    {{- else}}<span class="tile-value muted">unknown</span>{{end}}
+  </div>
+  <a class="tile" href="/runs?state=queued">
+    <span class="tile-label">{{icon "queued"}} Active</span>
+    <span class="tile-value"><span class="big">{{len .Active}}</span><span class="muted"> {{plural (len .Active) "run" "runs"}}</span></span>
+    <span class="tile-sub">running and queued</span>
+  </a>
+</div>
+
+{{- if .Active}}
+<section class="card">
+  <h2>Active</h2>
+  {{template "run-table" .Active}}
+</section>
+{{- end}}
+
+<div class="cols">
+<section class="card">
+  <div class="cardhead">
+    <h2>Drift by host</h2>
+    {{- with .DriftFrom}}<span class="muted">from <a href="/runs/{{.ID}}">run #{{.ID}}</a> ({{.Kind}}, {{template "time" .FinishedISO}})</span>{{end}}
+  </div>
+  {{- if .Drift}}
+  <div class="tablewrap">
+  <table class="drift">
+  <thead><tr><th>Host</th><th class="num">Would change</th><th class="num">Failed</th><th>Reachable</th></tr></thead>
+  <tbody>
+  {{- range .Drift}}
+  <tr>
+    <td><a class="host" href="/runs/{{$.DriftFrom.ID}}#h-{{.Host}}">{{icon "host"}}{{.Host}}</a></td>
+    <td class="num">{{if .Changed}}<span class="pill warn">{{.Changed}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
+    <td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
+    <td>{{if .Unreachable}}<span class="pill bad">unreachable</span>{{else}}<span class="ok">yes</span>{{end}}</td>
+  </tr>
+  {{- end}}
+  </tbody>
+  </table>
+  </div>
+  {{- else}}
+  <div class="empty">No finished main or nightly run yet.</div>
+  {{- end}}
+</section>
+
+<section class="card">
+  <div class="cardhead"><h2>Recent runs</h2><a href="/runs">All runs →</a></div>
+  {{- if .Recent}}
+  <ul class="feed">
+  {{- range .Recent}}
+    <li><a href="/runs/{{.ID}}">
+      {{template "badge" .State}}
+      <span class="feed-main"><span class="feed-title">#{{.ID}} {{template "kind" .Kind}} {{if .MR}}{{.MR}}{{else}}<span class="mono">{{.Ref}}</span>{{end}} · <span class="mono">{{.SHA}}</span></span>
+      <span class="feed-sub">{{template "result" .}}</span></span>
+      <span class="feed-time muted">{{template "time" .QueuedISO}}</span>
+    </a></li>
+  {{- end}}
+  </ul>
+  {{- else}}
+  <div class="empty">No runs yet.</div>
+  {{- end}}
+</section>
+</div>
+{{- end}}

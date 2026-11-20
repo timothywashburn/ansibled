@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -91,11 +92,39 @@ func (f *fakeRuns) GetRun(_ context.Context, id int64) (*model.Run, error) {
 	return nil, f.err
 }
 
-func (f *fakeRuns) ListRuns(_ context.Context, limit, offset int) ([]*model.Run, error) {
-	if offset >= len(f.runs) {
+func (f *fakeRuns) FilterRuns(_ context.Context, flt model.RunFilter, limit, offset int) ([]*model.Run, error) {
+	var match []*model.Run
+	for _, r := range f.runs {
+		if (len(flt.Kinds) == 0 || slices.Contains(flt.Kinds, r.Kind)) &&
+			(len(flt.States) == 0 || slices.Contains(flt.States, r.State)) &&
+			(flt.MRIID == 0 || flt.MRIID == r.MRIID) {
+			match = append(match, r)
+		}
+	}
+	if offset >= len(match) {
 		return nil, f.err
 	}
-	return f.runs[offset:min(len(f.runs), offset+limit)], f.err
+	return match[offset:min(len(match), offset+limit)], f.err
+}
+
+func (f *fakeRuns) ListByState(_ context.Context, states ...model.State) ([]*model.Run, error) {
+	var out []*model.Run
+	for i := len(f.runs) - 1; i >= 0; i-- {
+		if slices.Contains(states, f.runs[i].State) {
+			out = append(out, f.runs[i])
+		}
+	}
+	return out, f.err
+}
+
+func (f *fakeRuns) LatestFinished(_ context.Context, kinds ...model.Kind) (*model.Run, error) {
+	for _, r := range f.runs {
+		if (r.State == model.StateSuccess || r.State == model.StateFailed || r.State == model.StateError) &&
+			(len(kinds) == 0 || slices.Contains(kinds, r.Kind)) {
+			return r, f.err
+		}
+	}
+	return nil, f.err
 }
 
 // syncBuf is a goroutine-safe log sink.
@@ -317,9 +346,10 @@ func TestSecurityHeaders(t *testing.T) {
 	e := newEnv(t, nil)
 	res := e.do(t, "GET", "/logout", nil, nil)
 	want := map[string]string{
-		"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
-		"X-Frame-Options":         "DENY",
-		"Referrer-Policy":         "same-origin",
+		"Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+			"connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+		"X-Frame-Options": "DENY",
+		"Referrer-Policy": "same-origin",
 	}
 	for k, v := range want {
 		if got := res.Header.Get(k); got != v {
@@ -443,7 +473,7 @@ func TestSecureCookieOnHTTPS(t *testing.T) {
 	if c := cookie(res, "ansibled_session_lab"); c == nil || !c.Secure {
 		t.Errorf("session cookie not Secure: %+v", c)
 	}
-	if res.Header.Get("Location") != "/runs" {
+	if res.Header.Get("Location") != "/" {
 		t.Errorf("default next = %q", res.Header.Get("Location"))
 	}
 }
@@ -573,16 +603,16 @@ func TestSessionRejected(t *testing.T) {
 
 func TestSafeNext(t *testing.T) {
 	for in, want := range map[string]string{
-		"":                      "/runs",
+		"":                      "/",
 		"/runs/4":               "/runs/4",
 		"/runs?page=2":          "/runs?page=2",
-		"runs":                  "/runs",
-		"//evil.example/":       "/runs",
-		"/\\evil.example":       "/runs",
-		"https://evil.example/": "/runs",
-		"/runs\r\nSet-Cookie:x": "/runs",
-		"/login":                "/runs",
-		"/oauth/callback?x":     "/runs",
+		"runs":                  "/",
+		"//evil.example/":       "/",
+		"/\\evil.example":       "/",
+		"https://evil.example/": "/",
+		"/runs\r\nSet-Cookie:x": "/",
+		"/login":                "/",
+		"/oauth/callback?x":     "/",
 		"/%2F/evil":             "/%2F/evil",
 	} {
 		if got := safeNext(in); got != want {
@@ -594,14 +624,14 @@ func TestSafeNext(t *testing.T) {
 	e := newEnv(t, nil)
 	oc, q := e.startLogin(t, "//evil.example/x")
 	res := e.do(t, "GET", "/oauth/callback?code=x&state="+q.Get("state"), nil, nil, oc)
-	if loc := res.Header.Get("Location"); loc != "/runs" {
+	if loc := res.Header.Get("Location"); loc != "/" {
 		t.Errorf("redirect to %q", loc)
 	}
 }
 
-func TestRootRedirect(t *testing.T) {
+func TestRootNeedsSession(t *testing.T) {
 	e := newEnv(t, nil)
-	if res := e.do(t, "GET", "/", nil, nil); res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/runs" {
+	if res := e.do(t, "GET", "/", nil, nil); res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/login?next=%2F" {
 		t.Errorf("/ -> %d %q", res.StatusCode, res.Header.Get("Location"))
 	}
 }
@@ -637,7 +667,7 @@ func TestRunList(t *testing.T) {
 		t.Error("page 1 has more than 50 runs")
 	}
 	body = readBody(t, e.do(t, "GET", "/runs?page=2", nil, nil, sc))
-	if !strings.Contains(body, `href="/runs/10"`) || !strings.Contains(body, `href="/runs?page=1"`) || strings.Contains(body, "page=3") {
+	if !strings.Contains(body, `href="/runs/10"`) || !strings.Contains(body, `href="/runs">← Newer`) || strings.Contains(body, "page=3") {
 		t.Errorf("page 2 wrong")
 	}
 }
@@ -657,7 +687,7 @@ func TestRunPage(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(e.logDir, "5"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(e.logDir, "5", "log.txt"), []byte("TASK [x] <b>bold</b>\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.logDir, "5", "log.txt"), []byte("TASK [x]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sc := e.login(t)
@@ -670,25 +700,23 @@ func TestRunPage(t *testing.T) {
 	if strings.Contains(body, evil) || !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Errorf("task name not escaped:\n%s", body)
 	}
-	if strings.Contains(body, "<b>bold</b>") || !strings.Contains(body, "&lt;b&gt;bold&lt;/b&gt;") {
-		t.Errorf("log not escaped")
-	}
-	for _, s := range []string{"site.yml", "web1", "db1", "broken task", `/runs/5/log.txt`} {
+	for _, s := range []string{"site.yml", "web1", "db1", "broken task", `/runs/5/log.txt`, `data-stream="/runs/5/stream"`,
+		`id="h-web1"`, `data-active=""`} {
 		if !strings.Contains(body, s) {
 			t.Errorf("missing %q", s)
 		}
 	}
-	if strings.Contains(body, `http-equiv="refresh"`) {
-		t.Error("finished run refreshes")
+	if strings.Contains(body, "/rerun") {
+		t.Error("buttons shown without Actions")
 	}
 
 	body = readBody(t, e.do(t, "GET", "/runs/6", nil, nil, sc))
-	if !strings.Contains(body, `<meta http-equiv="refresh" content="5">`) {
-		t.Error("queued run does not refresh")
+	if !strings.Contains(body, `data-active="1"`) || !strings.Contains(body, "Waiting for output") {
+		t.Error("queued run not marked active")
 	}
 
 	body = readBody(t, e.do(t, "GET", "/runs/7", nil, nil, sc))
-	if !strings.Contains(body, "log expired") {
+	if !strings.Contains(body, "removed by retention") || strings.Contains(body, "data-stream") {
 		t.Error("expired log not reported")
 	}
 
@@ -726,45 +754,6 @@ func TestRawLog(t *testing.T) {
 	}
 }
 
-func TestLogTailTruncation(t *testing.T) {
-	e := newEnv(t, nil)
-	e.runs.runs = []*model.Run{mkRun(5, model.StateSuccess)}
-	_ = os.MkdirAll(filepath.Join(e.logDir, "5"), 0o755)
-	var b strings.Builder
-	b.WriteString("FIRST-LINE-MARKER\n")
-	line := strings.Repeat("x", 99) + "\n"
-	for b.Len() < 3<<20 {
-		b.WriteString(line)
-	}
-	b.WriteString("LAST-LINE-MARKER\n")
-	_ = os.WriteFile(filepath.Join(e.logDir, "5", "log.txt"), []byte(b.String()), 0o644)
-	sc := e.login(t)
-
-	body := readBody(t, e.do(t, "GET", "/runs/5", nil, nil, sc))
-	if strings.Contains(body, "FIRST-LINE-MARKER") || !strings.Contains(body, "LAST-LINE-MARKER") {
-		t.Error("log not tail-truncated")
-	}
-	if !strings.Contains(body, "larger than 2.0 MiB") {
-		t.Error("no truncation note")
-	}
-	if len(body) > 2<<20+64<<10 {
-		t.Errorf("page is %d bytes", len(body))
-	}
-
-	// Unit: the tail starts at a line boundary.
-	p := filepath.Join(t.TempDir(), "log")
-	_ = os.WriteFile(p, []byte("aaaa\nbbbb\ncccc\n"), 0o644)
-	v, err := readLogTail(p, 8)
-	if err != nil || !v.Truncated || v.Text != "cccc\n" {
-		t.Errorf("readLogTail = %+v, %v", v, err)
-	}
-	v, err = readLogTail(p, 100)
-	if err != nil || v.Truncated || v.Text != "aaaa\nbbbb\ncccc\n" {
-		t.Errorf("readLogTail small = %+v, %v", v, err)
-	}
-}
-
-// freeAddr returns a loopback address that was free a moment ago.
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

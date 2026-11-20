@@ -1,0 +1,58 @@
+{{define "badge" -}}
+<span class="badge s-{{.}}">{{icon (print .)}}<span>{{.}}</span></span>
+{{- end}}
+
+{{define "time" -}}
+{{if .}}<time datetime="{{.}}" data-rel>{{.}}</time>{{end}}
+{{- end}}
+
+{{define "kind" -}}
+<span class="kind k-{{.}}">{{if eq (print .) "mr"}}MR{{else}}{{.}}{{end}}</span>
+{{- end}}
+
+{{define "result" -}}
+{{- if .HasSummary -}}
+<span class="result">
+{{- if .FailedHosts}}<span class="pill bad">{{.FailedHosts}} failed</span>{{end -}}
+{{- if .ChangedHosts}}<span class="pill warn">{{.ChangedHosts}} {{plural .ChangedHosts "host" "hosts"}} would change</span>{{end -}}
+{{- if and (not .FailedHosts) (not .ChangedHosts)}}<span class="pill ok">no changes</span>{{end -}}
+</span>
+{{- else -}}
+<span class="muted">{{.Description}}</span>
+{{- end -}}
+{{- end}}
+
+{{define "commit" -}}
+{{- if .CommitURL}}<a class="mono" href="{{.CommitURL}}" title="{{.FullSHA}}" rel="noreferrer" target="_blank">{{.SHA}}</a>
+{{- else}}<span class="mono" title="{{.FullSHA}}">{{.SHA}}</span>{{end -}}
+{{- end}}
+
+{{define "mr" -}}
+{{- if .MR}}{{if .MRURL}}<a href="{{.MRURL}}" rel="noreferrer" target="_blank">{{.MR}}</a>{{else}}{{.MR}}{{end}}{{end -}}
+{{- end}}
+
+{{define "run-rows" -}}
+{{- range .}}
+<tr class="{{if .Active}}active{{end}}" data-href="/runs/{{.ID}}">
+  <td>{{template "badge" .State}}</td>
+  <td class="num"><a class="runlink" href="/runs/{{.ID}}">#{{.ID}}</a></td>
+  <td>{{template "kind" .Kind}} {{template "mr" .}}</td>
+  <td class="ref"><span class="mono">{{.Ref}}</span> · {{template "commit" .}}</td>
+  <td class="desc">{{template "result" .}}</td>
+  <td class="muted nowrap">{{.Trigger}}{{if .By}} · {{.By}}{{end}}</td>
+  <td class="muted nowrap">{{template "time" .QueuedISO}}</td>
+  <td class="num muted nowrap">{{if .Active}}{{if .StartedISO}}<span data-elapsed="{{.StartedISO}}">{{.Duration}}</span>{{end}}{{else}}{{.Duration}}{{end}}</td>
+</tr>
+{{- end}}
+{{- end}}
+
+{{define "run-table" -}}
+<div class="tablewrap">
+<table class="runs">
+<thead><tr>
+  <th>Status</th><th class="num">Run</th><th>Kind</th><th>Ref</th><th>Result</th><th>Trigger</th><th>Queued</th><th class="num">Duration</th>
+</tr></thead>
+<tbody>{{template "run-rows" .}}</tbody>
+</table>
+</div>
+{{- end}}

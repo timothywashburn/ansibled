@@ -253,3 +253,37 @@ func TestConcurrentWrites(t *testing.T) {
 		t.Fatalf("count = %d", n)
 	}
 }
+
+func TestFilterRuns(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	mk := func(kind model.Kind, mr int, st model.State) *model.Run {
+		return create(t, s, &model.Run{Kind: kind, Key: model.Key(kind, mr), Mode: model.ModeCheck, SHA: "a", MRIID: mr, State: st})
+	}
+	a := mk(model.KindMR, 3, model.StateSuccess)
+	b := mk(model.KindMain, 0, model.StateFailed)
+	c := mk(model.KindMR, 4, model.StateFailed)
+	d := mk(model.KindNightly, 0, model.StateSuccess)
+	for name, tc := range map[string]struct {
+		f    model.RunFilter
+		want []int64
+	}{
+		"all":     {model.RunFilter{}, []int64{d.ID, c.ID, b.ID, a.ID}},
+		"kind":    {model.RunFilter{Kinds: []model.Kind{model.KindMR}}, []int64{c.ID, a.ID}},
+		"kinds":   {model.RunFilter{Kinds: []model.Kind{model.KindMain, model.KindNightly}}, []int64{d.ID, b.ID}},
+		"state":   {model.RunFilter{States: []model.State{model.StateFailed}}, []int64{c.ID, b.ID}},
+		"mr":      {model.RunFilter{MRIID: 3}, []int64{a.ID}},
+		"combine": {model.RunFilter{Kinds: []model.Kind{model.KindMR}, States: []model.State{model.StateFailed}}, []int64{c.ID}},
+	} {
+		got, err := s.FilterRuns(ctx, tc.f, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(ids(got), tc.want) {
+			t.Errorf("%s: %v, want %v", name, ids(got), tc.want)
+		}
+	}
+	if got, _ := s.FilterRuns(ctx, model.RunFilter{}, 2, 1); !reflect.DeepEqual(ids(got), []int64{c.ID, b.ID}) {
+		t.Errorf("limit/offset: %v", ids(got))
+	}
+}

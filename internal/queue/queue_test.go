@@ -645,3 +645,36 @@ func TestConcurrentEnqueue(t *testing.T) {
 	}
 	h.hooks.checkFinishedOnce(t, h.s)
 }
+
+func TestCancelRun(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	ctx := context.Background()
+	h.start(t)
+	running := h.enqueue(t, mainReq(shaA))
+	h.runner.waitStarted(t)
+	q1 := h.enqueue(t, mr(5, shaB))
+	q2 := h.enqueue(t, mr(6, shaB))
+
+	if err := h.q.CancelRun(ctx, q1.ID, "canceled by carol"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.get(t, q1.ID); got.State != model.StateCanceled || got.Description != "canceled by carol" {
+		t.Fatalf("queued after CancelRun = %+v", got)
+	}
+	if err := h.q.CancelRun(ctx, running.ID, "canceled by carol"); err != nil {
+		t.Fatal(err)
+	}
+	h.waitState(t, running.ID, model.StateCanceled)
+	if err := h.q.CancelRun(ctx, q1.ID, "again"); !errors.Is(err, ErrNotActive) {
+		t.Errorf("finished run: %v", err)
+	}
+	if err := h.q.CancelRun(ctx, 999, "x"); !errors.Is(err, ErrNotActive) {
+		t.Errorf("missing run: %v", err)
+	}
+	if s := h.runner.waitStarted(t); s.ID != q2.ID {
+		t.Fatalf("started %d, want %d (CancelRun must not touch other runs)", s.ID, q2.ID)
+	}
+	h.runner.finish(t, model.StateSuccess)
+	h.waitState(t, q2.ID, model.StateSuccess)
+	h.hooks.checkFinishedOnce(t, h.s)
+}

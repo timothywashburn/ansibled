@@ -16,6 +16,10 @@ import (
 // ANSIBLE_LOG_PATH is left unset (setting it to "" makes ansible warn that
 // the working directory is not a file).
 //
+// Output is coloured (ANSIBLE_FORCE_COLOR) for the web UI's console; the raw
+// log download strips the escapes. ansible.env can turn it off with
+// ANSIBLE_NOCOLOR=1.
+//
 // ansible.env from the config is applied last, except that
 // ANSIBLE_CALLBACK_PLUGINS and ANSIBLE_CALLBACKS_ENABLED from it are merged
 // with ansibled's values so the events callback is always loaded.
@@ -25,7 +29,7 @@ func (rc *runCtxt) ansibleEnv() *env {
 	if rc.cfg.Ansible.RemoteUser != "" {
 		ev.Set("ANSIBLE_REMOTE_USER", rc.cfg.Ansible.RemoteUser)
 	}
-	ev.Set("ANSIBLE_NOCOLOR", "1")
+	ev.Set("ANSIBLE_FORCE_COLOR", "1")
 	ev.Set("ANSIBLE_RETRY_FILES_ENABLED", "0")
 	if rc.collections != "" {
 		ev.Set("ANSIBLE_COLLECTIONS_PATH", rc.collections)

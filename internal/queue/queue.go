@@ -209,19 +209,41 @@ type cancelReason string
 
 func (c cancelReason) Error() string { return "canceled: " + string(c) }
 
+// ErrNotActive is returned by CancelRun for a run that is not queued or running.
+var ErrNotActive = errors.New("run is not queued or running")
+
+// CancelRun cancels one queued or running run, setting its description to reason.
+func (q *Queue) CancelRun(ctx context.Context, id int64, reason string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	r, err := q.o.Store.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if r == nil || r.State.Finished() {
+		return ErrNotActive
+	}
+	return q.cancelLocked(ctx, []*model.Run{r}, reason)
+}
+
 // cancelKeyLocked does CancelKey; q.mu must be held.
 func (q *Queue) cancelKeyLocked(ctx context.Context, key, reason string) error {
 	active, err := q.o.Store.ActiveByKey(ctx, key)
 	if err != nil {
 		return err
 	}
+	return q.cancelLocked(ctx, active, reason)
+}
+
+// cancelLocked cancels the given active runs; q.mu must be held.
+func (q *Queue) cancelLocked(ctx context.Context, active []*model.Run, reason string) error {
 	queuedChanged := false
 	var errs []error
 	for _, r := range active {
 		if q.cur != nil && r.ID == q.cur.ID {
 			// The worker records the final state when the runner returns.
 			if q.curReason == "" {
-				q.log.Info("canceling running run", "run", r.ID, "key", key, "reason", reason)
+				q.log.Info("canceling running run", "run", r.ID, "key", r.Key, "reason", reason)
 				q.curReason = reason
 				q.curCancel(cancelReason(reason))
 			}
@@ -231,7 +253,7 @@ func (q *Queue) cancelKeyLocked(ctx context.Context, key, reason string) error {
 		if r.State == model.StateQueued {
 			queuedChanged = true
 		}
-		q.log.Info("canceling run", "run", r.ID, "key", key, "state", r.State, "reason", reason)
+		q.log.Info("canceling run", "run", r.ID, "key", r.Key, "state", r.State, "reason", reason)
 		r.State = model.StateCanceled
 		r.Description = reason
 		r.FinishedAt = time.Now()

@@ -175,6 +175,34 @@ func (s *Store) ListRuns(ctx context.Context, limit, offset int) ([]*model.Run, 
 	return s.many(ctx, `SELECT `+columns+` FROM runs ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
 }
 
+// FilterRuns is ListRuns restricted to the runs matching f.
+func (s *Store) FilterRuns(ctx context.Context, f model.RunFilter, limit, offset int) ([]*model.Run, error) {
+	if limit <= 0 {
+		limit = -1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := `SELECT ` + columns + ` FROM runs WHERE 1 = 1`
+	var args []any
+	if len(f.Kinds) > 0 {
+		in, a := inList(f.Kinds)
+		q += ` AND kind IN (` + in + `)`
+		args = append(args, a...)
+	}
+	if len(f.States) > 0 {
+		in, a := inList(f.States)
+		q += ` AND state IN (` + in + `)`
+		args = append(args, a...)
+	}
+	if f.MRIID > 0 {
+		q += ` AND mr_iid = ?`
+		args = append(args, f.MRIID)
+	}
+	q += ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	return s.many(ctx, q, append(args, limit, offset)...)
+}
+
 // ActiveByKey returns the queued and running runs with the given key, ascending ID.
 func (s *Store) ActiveByKey(ctx context.Context, key string) ([]*model.Run, error) {
 	return s.many(ctx, `SELECT `+columns+` FROM runs WHERE "key" = ? AND state IN (?, ?) ORDER BY id`,

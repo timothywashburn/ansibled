@@ -22,6 +22,7 @@ type event struct {
 	Action       string                `json:"action"`
 	IgnoreErrors bool                  `json:"ignore_errors"`
 	Msg          string                `json:"msg"`
+	Diff         string                `json:"diff"`
 	Hosts        map[string]statsEntry `json:"hosts"`
 }
 
@@ -118,4 +119,32 @@ func ParseEvents(r io.Reader, playbook string, exitCode int) (model.PlaybookResu
 	}
 	sort.Slice(res.Hosts, func(i, j int) bool { return res.Hosts[i].Host < res.Hosts[j].Host })
 	return res, nil
+}
+
+// ParseDetails returns the results of an events file that would change
+// something (with their diffs), failed (without ignore_errors) or were
+// unreachable, in run order. Malformed lines are skipped.
+func ParseDetails(r io.Reader) ([]model.TaskDetail, error) {
+	var out []model.TaskDetail
+	br := bufio.NewReader(r)
+	for {
+		line, rerr := br.ReadBytes('\n')
+		if rerr != nil && !errors.Is(rerr, io.EOF) {
+			return out, rerr
+		}
+		var ev event
+		if len(line) > 0 && json.Unmarshal(line, &ev) == nil && ev.Event == "result" && ev.Host != "" {
+			keep := ev.Status == "changed" || ev.Status == "unreachable" || (ev.Status == "failed" && !ev.IgnoreErrors)
+			if keep {
+				d := model.TaskDetail{Host: ev.Host, Play: ev.Play, Task: ev.Task, Action: ev.Action, Status: ev.Status, Diff: ev.Diff}
+				if ev.Status != "changed" {
+					d.Msg = ev.Msg
+				}
+				out = append(out, d)
+			}
+		}
+		if rerr != nil {
+			return out, nil
+		}
+	}
 }

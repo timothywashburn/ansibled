@@ -120,11 +120,11 @@ func (s *Server) requireSession(h func(http.ResponseWriter, *http.Request, *sess
 	})
 }
 
-// safeNext returns next if it is a local path, otherwise "/runs". It rejects
+// safeNext returns next if it is a local path, otherwise "/". It rejects
 // absolute and scheme-relative URLs ("//host", "/\host"), control characters
 // and the auth endpoints themselves.
 func safeNext(next string) string {
-	const def = "/runs"
+	const def = "/"
 	if len(next) == 0 || next[0] != '/' {
 		return def
 	}

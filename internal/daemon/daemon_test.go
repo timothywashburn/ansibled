@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -447,5 +448,66 @@ func TestIsCommand(t *testing.T) {
 		if got := IsCommand(body); got != want {
 			t.Errorf("IsCommand(%q) = %v", body, got)
 		}
+	}
+}
+
+func TestWebRerunAndCancel(t *testing.T) {
+	f := newFixture(t, true)
+	ctx := context.Background()
+	f.gl.AddMR(forge.MR{IID: 7, SourceBranch: "x", HeadSHA: shaB, State: "opened"})
+	f.gl.AddMR(forge.MR{IID: 8, SourceBranch: "y", HeadSHA: shaA, State: "merged"})
+
+	oldMR, _, err := f.q.Enqueue(ctx, queue.Request{Kind: model.KindMR, SHA: shaA, Ref: "x", MRIID: 7, Trigger: model.TriggerPush})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An MR re-run uses the MR's current head and supersedes the old run.
+	nr, err := f.d.Rerun(ctx, oldMR.ID, "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nr.SHA != shaB || nr.MRIID != 7 || nr.Trigger != model.TriggerWeb || nr.TriggeredBy != "carol" {
+		t.Errorf("MR re-run = %+v", nr)
+	}
+	f.waitFor("old MR run canceled", func(rs []*model.Run) bool {
+		for _, r := range rs {
+			if r.ID == oldMR.ID {
+				return r.State == model.StateCanceled
+			}
+		}
+		return false
+	})
+
+	// A main re-run runs the default branch head.
+	oldMain, _, _ := f.q.Enqueue(ctx, queue.Request{Kind: model.KindNightly, SHA: shaA, Ref: "main", Trigger: model.TriggerSchedule})
+	nm, err := f.d.Rerun(ctx, oldMain.ID, "carol")
+	if err != nil || nm.SHA != shaM || nm.Kind != model.KindNightly || nm.Ref != "main" {
+		t.Fatalf("nightly re-run = %+v, %v", nm, err)
+	}
+
+	// A merged MR cannot be re-run; the reason is for the user.
+	merged, _, _ := f.q.Enqueue(ctx, queue.Request{Kind: model.KindMR, SHA: shaA, Ref: "y", MRIID: 8, Trigger: model.TriggerPush})
+	var ae ActionError
+	if _, err := f.d.Rerun(ctx, merged.ID, "carol"); !errors.As(err, &ae) || !strings.Contains(err.Error(), "merged") {
+		t.Errorf("merged MR re-run err = %v", err)
+	}
+	if _, err := f.d.Rerun(ctx, 999, "carol"); !errors.As(err, &ae) {
+		t.Errorf("missing run err = %v", err)
+	}
+
+	// Cancel one run; cancelling it again is a user error.
+	if err := f.d.Cancel(ctx, nm.ID, "carol"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitFor("nightly canceled", func(rs []*model.Run) bool {
+		for _, r := range rs {
+			if r.ID == nm.ID {
+				return r.State == model.StateCanceled && r.Description == "canceled by carol"
+			}
+		}
+		return false
+	})
+	if err := f.d.Cancel(ctx, nm.ID, "carol"); !errors.As(err, &ae) {
+		t.Errorf("second cancel err = %v", err)
 	}
 }

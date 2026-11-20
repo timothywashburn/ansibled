@@ -180,6 +180,37 @@ type apiProject struct {
 	} `json:"permissions"`
 }
 
+// projectWebURL is the project's page, or "" while unknown (a numeric project
+// id before the first API call).
+func (c *Client) projectWebURL() string {
+	c.mu.Lock()
+	p := c.project
+	c.mu.Unlock()
+	if p != nil && p.WebURL != "" {
+		return strings.TrimRight(p.WebURL, "/")
+	}
+	if _, err := strconv.ParseInt(c.opts.Project, 10, 64); err == nil {
+		return ""
+	}
+	return c.baseURL + "/" + c.opts.Project
+}
+
+// CommitURL is the web page of a commit, or "" if unknown.
+func (c *Client) CommitURL(sha string) string {
+	if p := c.projectWebURL(); p != "" && sha != "" {
+		return p + "/-/commit/" + url.PathEscape(sha)
+	}
+	return ""
+}
+
+// MRURL is the web page of a merge request, or "" if unknown.
+func (c *Client) MRURL(iid int) string {
+	if p := c.projectWebURL(); p != "" && iid > 0 {
+		return p + "/-/merge_requests/" + strconv.Itoa(iid)
+	}
+	return ""
+}
+
 // projectInfo returns GET /projects/:id, cached after the first success.
 func (c *Client) projectInfo(ctx context.Context) (*apiProject, error) {
 	c.mu.Lock()

@@ -1,7 +1,9 @@
 {{define "content" -}}
+<section class="card narrow message">
 <h1>{{.Title}}</h1>
 <p>{{.Message}}</p>
 {{- if .Link}}
-<p><a href="{{.Link}}">{{.LinkText}}</a></p>
+<p><a class="btn" href="{{.Link}}">{{.LinkText}}</a></p>
 {{- end}}
+</section>
 {{- end}}

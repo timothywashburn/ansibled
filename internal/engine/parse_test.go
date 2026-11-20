@@ -145,3 +145,27 @@ func TestPlaybookState(t *testing.T) {
 		})
 	}
 }
+
+func TestParseDetails(t *testing.T) {
+	events := lines(
+		`{"event":"result","status":"ok","host":"web1","task":"ping"}`,
+		`{"event":"result","status":"changed","host":"web1","play":"base","task":"motd","action":"ansible.builtin.copy","diff":"-a\n+b\n","msg":"ignored"}`,
+		`{"event":"result","status":"failed","host":"db1","task":"svc","msg":"no unit","ignore_errors":false}`,
+		`{"event":"result","status":"failed","host":"db1","task":"probe","msg":"meh","ignore_errors":true}`,
+		`{"event":"result","status":"unreachable","host":"gone","task":"Gathering Facts","msg":"timeout"}`,
+		`not json`,
+		`{"event":"stats","hosts":{}}`,
+	)
+	got, err := ParseDetails(strings.NewReader(events))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []model.TaskDetail{
+		{Host: "web1", Play: "base", Task: "motd", Action: "ansible.builtin.copy", Status: "changed", Diff: "-a\n+b\n"},
+		{Host: "db1", Task: "svc", Status: "failed", Msg: "no unit"},
+		{Host: "gone", Task: "Gathering Facts", Status: "unreachable", Msg: "timeout"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v\nwant %+v", got, want)
+	}
+}

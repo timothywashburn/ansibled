@@ -18,7 +18,9 @@ description:
     environment variable. Does nothing when that variable is unset.
   - Only task-level results are recorded (not individual loop items), plus play
     starts, task starts, handler starts and the final stats.
-  - Messages are truncated to 2000 characters.
+  - Messages are truncated to 4000 characters.
+  - Results that would change something carry their C(--diff) output (plain
+    text, unified diff, truncated to 64 KiB), including the diffs of loop items.
 version_added: "2.15"
 requirements:
   - Enable it with C(ANSIBLE_CALLBACKS_ENABLED=ansibled_events).
@@ -26,10 +28,13 @@ requirements:
 
 import json
 import os
+import re
 
 from ansible.plugins.callback import CallbackBase
 
-MSG_LIMIT = 2000
+MSG_LIMIT = 4000
+DIFF_LIMIT = 64 * 1024
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def _parts(result):
@@ -71,6 +76,25 @@ def _text(v):
     if len(s) > MSG_LIMIT:
         s = s[:MSG_LIMIT]
     return s
+
+
+def _diffs(res):
+    """Collect the diff entries of a result and of its changed loop items."""
+    out = []
+
+    def add(d):
+        if isinstance(d, list):
+            out.extend(x for x in d if x)
+        elif d:
+            out.append(d)
+
+    add(res.get("diff"))
+    items = res.get("results")
+    if isinstance(items, list):
+        for it in items:
+            if isinstance(it, dict) and it.get("changed") and it.get("diff"):
+                add(it.get("diff"))
+    return out
 
 
 class CallbackModule(CallbackBase):
@@ -143,10 +167,9 @@ class CallbackModule(CallbackBase):
         if task is not None:
             action = _safe(lambda: task.resolved_action) or _safe(lambda: task.action)
         msg = res.get("msg")
-        if not msg and status == "failed":
-            msg = res.get("stderr") or res.get("reason")
-        self._emit(
-            "result",
+        if not msg and status in ("failed", "unreachable"):
+            msg = res.get("stderr") or res.get("module_stderr") or res.get("reason")
+        fields = dict(
             status=status,
             host=str(_safe(lambda: host.get_name())) if host is not None else "",
             play=self._play,
@@ -155,6 +178,25 @@ class CallbackModule(CallbackBase):
             ignore_errors=bool(ignore_errors),
             msg=_text(msg),
         )
+        if status == "changed":
+            diff = self._diff_text(res)
+            if diff:
+                fields["diff"] = diff
+        self._emit("result", **fields)
+
+    def _diff_text(self, res):
+        """Render a result's diffs the way ansible prints them, without colour."""
+        entries = _diffs(res)
+        if not entries:
+            return ""
+        try:
+            text = self._get_diff(entries)
+        except Exception:
+            return ""
+        text = _ANSI.sub("", text or "")
+        if len(text) > DIFF_LIMIT:
+            text = text[:DIFF_LIMIT] + "\n[diff truncated by ansibled]\n"
+        return text
 
     def v2_runner_on_ok(self, result):
         _, _, res = _parts(result)

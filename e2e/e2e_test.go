@@ -611,13 +611,14 @@ func (s *suite) webUI(t *testing.T) {
 		"groups": []any{"sysadmins"},
 	})
 	r = get(t, browser, s.webURL+"/login")
-	if r.Status != http.StatusOK || !strings.HasSuffix(r.URL, "/runs") {
+	if r.Status != http.StatusOK || !strings.HasSuffix(r.URL, "/") || !strings.Contains(r.Body, "Drift by host") {
 		t.Fatalf("sign-in as alice ended at %s with %d:\n%s", r.URL, r.Status, r.Body)
 	}
 	if !slices.ContainsFunc(browser.Jar.Cookies(mustURL(t, s.webURL)), func(c *http.Cookie) bool { return c.Name == "ansibled_session_"+site }) {
 		t.Errorf("no session cookie after sign-in")
 	}
 	s.alice = browser
+	r = get(t, browser, s.webURL+"/runs")
 	// The daemon (in the container) exchanged the code and read userinfo.
 	if n, m := s.idp.CountRequests(oidctest.Token), s.idp.CountRequests(oidctest.Userinfo); n != 1 || m != 1 {
 		t.Errorf("provider saw %d token and %d userinfo requests, want 1 each", n, m)
@@ -637,17 +638,32 @@ func (s *suite) webUI(t *testing.T) {
 	if r.Status != http.StatusOK {
 		t.Fatalf("/runs/%d: %d", s.mainRunID, r.Status)
 	}
-	for _, want := range []string{"TASK [Render sample config]", "PLAY RECAP", s.main, "would change"} {
+	// The Changes tab shows the template's diff, recorded by the callback.
+	for _, want := range []string{"Render sample config", s.main, "would change", "ansible.builtin.template",
+		`<span class="dl file">&#43;&#43;&#43; after`, `<span class="dl add">`} {
 		if !strings.Contains(r.Body, want) {
 			t.Errorf("/runs/%d lacks %q", s.mainRunID, want)
 		}
+	}
+	// The live stream replays the whole log of a finished run, in colour.
+	r = get(t, browser, fmt.Sprintf("%s/runs/%d/stream", s.webURL, s.mainRunID))
+	if r.Status != http.StatusOK || r.Header.Get("Content-Type") != "text/event-stream" {
+		t.Errorf("stream: %d %q", r.Status, r.Header.Get("Content-Type"))
+	}
+	for _, want := range []string{"event: run", "event: log", "event: done", "TASK [Render sample config]", "PLAY RECAP", `\u001b[0;33m`} {
+		if !strings.Contains(r.Body, want) {
+			t.Errorf("stream lacks %q", want)
+		}
+	}
+	if r := get(t, browser, fmt.Sprintf("%s/runs/%d/log.txt?ansi=1", s.webURL, s.mainRunID)); !strings.Contains(r.Body, "\x1b[") {
+		t.Errorf("log.txt?ansi=1 has no colour codes")
 	}
 	r = get(t, browser, fmt.Sprintf("%s/runs/%d/log.txt", s.webURL, s.mainRunID))
 	if r.Status != http.StatusOK || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/plain") {
 		t.Errorf("log.txt: %d %q", r.Status, r.Header.Get("Content-Type"))
 	}
-	if !strings.Contains(r.Body, "ansible-playbook") || !strings.Contains(r.Body, "ok=") {
-		t.Errorf("log.txt lacks ansible output:\n%s", r.Body)
+	if !strings.Contains(r.Body, "ansible-playbook") || !strings.Contains(r.Body, "ok=") || strings.Contains(r.Body, "\x1b[") {
+		t.Errorf("log.txt lacks ansible output or has colour codes:\n%s", r.Body)
 	}
 	if r := get(t, browser, s.webURL+"/runs/999999"); r.Status != http.StatusNotFound {
 		t.Errorf("/runs/999999: %d", r.Status)
@@ -731,7 +747,7 @@ func (s *suite) cancelOnMerge(t *testing.T) {
 		t.Errorf("comment:\n%s", n.Body)
 	}
 	r := get(t, s.alice, fmt.Sprintf("%s/runs/%d", s.webURL, id))
-	if !strings.Contains(r.Body, "state-canceled") || !strings.Contains(r.Body, "MR merged") {
+	if !strings.Contains(r.Body, `class="badge s-canceled"`) || !strings.Contains(r.Body, "MR merged") {
 		t.Errorf("run page does not show the cancel:\n%s", r.Body)
 	}
 	if r := get(t, s.alice, logURL); !strings.Contains(r.Body, "run canceled") {

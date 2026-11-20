@@ -526,3 +526,24 @@ func TestCheck(t *testing.T) {
 		t.Errorf("requests: %v", srv4.Requests())
 	}
 }
+
+func TestWebLinks(t *testing.T) {
+	c, _ := newTest(t)
+	if got, want := c.CommitURL("abc"), c.baseURL+"/myorg/infra/-/commit/abc"; got != want {
+		t.Errorf("CommitURL = %q, want %q", got, want)
+	}
+	if got, want := c.MRURL(7), c.baseURL+"/myorg/infra/-/merge_requests/7"; got != want {
+		t.Errorf("MRURL = %q, want %q", got, want)
+	}
+	n, srv := newTest(t, func(o *Options) { o.Project = "17" })
+	srv.SetProject("myorg/infra", 17, "main")
+	if u := n.CommitURL("abc"); u != "" {
+		t.Errorf("numeric project before lookup: %q", u)
+	}
+	if _, err := n.DefaultBranch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if u := n.MRURL(3); !strings.HasSuffix(u, "/-/merge_requests/3") {
+		t.Errorf("numeric project after lookup: %q", u)
+	}
+}

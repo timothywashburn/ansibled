@@ -1,5 +1,6 @@
 // Package web serves ansibled's HTTP endpoints (DESIGN.md "Web UI and auth"):
-// the forge webhook, the log pages behind OpenID Connect sign-in, /metrics
+// the forge webhook, the web UI behind OpenID Connect sign-in (overview, run
+// list, run pages with a live log console, re-run and cancel), /metrics
 // behind a bearer token, and /healthz.
 package web
 
@@ -26,8 +27,28 @@ import (
 type RunSource interface {
 	// GetRun returns (nil, nil) if the run does not exist.
 	GetRun(ctx context.Context, id int64) (*model.Run, error)
-	// ListRuns returns runs newest first.
-	ListRuns(ctx context.Context, limit, offset int) ([]*model.Run, error)
+	// FilterRuns returns the runs matching f, newest first.
+	FilterRuns(ctx context.Context, f model.RunFilter, limit, offset int) ([]*model.Run, error)
+	// ListByState returns the runs in one of states, oldest first.
+	ListByState(ctx context.Context, states ...model.State) ([]*model.Run, error)
+	// LatestFinished returns the last run of one of kinds that finished
+	// (success, failed or error), or (nil, nil).
+	LatestFinished(ctx context.Context, kinds ...model.Kind) (*model.Run, error)
+}
+
+// Actions are the buttons of the web UI. *daemon.Daemon implements it.
+// Errors of type daemon.ActionError are shown to the user as they are.
+type Actions interface {
+	// Rerun queues the run again and returns the new run.
+	Rerun(ctx context.Context, id int64, user string) (*model.Run, error)
+	// Cancel cancels a queued or running run.
+	Cancel(ctx context.Context, id int64, user string) error
+}
+
+// Links is optionally implemented by the Forge to link commits and MRs.
+type Links interface {
+	CommitURL(sha string) string // "" if unknown
+	MRURL(iid int) string        // "" if unknown
 }
 
 // SignIn signs people in to the web UI. *oidc.Provider implements it.
@@ -42,11 +63,16 @@ type SignIn interface {
 
 // Options configure a Server.
 type Options struct {
-	Config       *config.Config
-	Forge        forge.Forge // Name and HandleWebhook
-	SignIn       SignIn      // web UI sign-in
-	Runs         RunSource
-	LogPath      func(id int64) string // path of a run's log.txt
+	Config  *config.Config
+	Forge   forge.Forge // Name and HandleWebhook
+	SignIn  SignIn      // web UI sign-in
+	Runs    RunSource
+	LogPath func(id int64) string // path of a run's log.txt
+	// Details reads the changed/failed results of playbook n of a run (the
+	// Changes tab). Optional.
+	Details func(id int64, n int) ([]model.TaskDetail, error)
+	// Actions enables the re-run and cancel buttons. Optional.
+	Actions      Actions
 	Metrics      *metrics.Metrics
 	MetricsToken string
 	SessionKey   []byte // HMAC key for cookies; if empty, 32 random bytes
@@ -58,11 +84,13 @@ type Options struct {
 
 // Server is ansibled's HTTP front end.
 type Server struct {
-	o     Options
-	cfg   *config.Config
-	log   *slog.Logger
-	key   []byte
-	pages *pages
+	o      Options
+	cfg    *config.Config
+	log    *slog.Logger
+	key    []byte
+	pages  *pages
+	assets *assets
+	links  Links
 
 	webhookPath  string
 	secure       bool   // cookies get the Secure flag
@@ -73,6 +101,7 @@ type Server struct {
 	retry        time.Duration // bind retry interval
 	warnEvery    time.Duration // at most one bind warning per interval
 	shutdownWait time.Duration
+	streamPoll   time.Duration // how often a log stream looks for new output
 }
 
 // Timings and limits.
@@ -82,6 +111,8 @@ const (
 	maxWebhookBody  = 5 << 20
 	logInlineLimit  = 2 << 20
 	runsPerPage     = 50
+	streamChunk     = 256 << 10
+	defaultPoll     = 250 * time.Millisecond
 	defaultRetry    = 5 * time.Second
 	defaultWarn     = time.Minute
 	defaultShutdown = 10 * time.Second
@@ -114,10 +145,15 @@ func New(o Options) (*Server, error) {
 			return nil, fmt.Errorf("web: session key: %w", err)
 		}
 	}
-	p, err := loadPages()
+	a, err := loadAssets()
 	if err != nil {
 		return nil, err
 	}
+	p, err := loadPages(a)
+	if err != nil {
+		return nil, err
+	}
+	links, _ := o.Forge.(Links)
 	cfg := o.Config
 	return &Server{
 		o:            o,
@@ -125,6 +161,9 @@ func New(o Options) (*Server, error) {
 		log:          o.Logger,
 		key:          key,
 		pages:        p,
+		assets:       a,
+		links:        links,
+		streamPoll:   defaultPoll,
 		webhookPath:  "/webhook/" + o.Forge.Name(),
 		secure:       strings.HasPrefix(cfg.PublicURL, "https://"),
 		sessionName:  "ansibled_session_" + cfg.Site,
@@ -148,9 +187,8 @@ func (s *Server) mux(webhook, web bool) http.Handler {
 		m.HandleFunc("POST "+s.webhookPath, s.webhook)
 	}
 	if web {
-		m.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/runs", http.StatusFound)
-		})
+		m.Handle("GET /{$}", s.requireSession(s.overview))
+		m.HandleFunc("GET /static/{name}", s.static)
 		m.HandleFunc("GET /metrics", s.metrics)
 		m.HandleFunc("GET /login", s.login)
 		m.HandleFunc("GET /oauth/callback", s.callback)
@@ -159,6 +197,9 @@ func (s *Server) mux(webhook, web bool) http.Handler {
 		m.Handle("GET /runs", s.requireSession(s.runList))
 		m.Handle("GET /runs/{id}", s.requireSession(s.runPage))
 		m.Handle("GET /runs/{id}/log.txt", s.requireSession(s.runLog))
+		m.Handle("GET /runs/{id}/stream", s.requireSession(s.runStream))
+		m.Handle("POST /runs/{id}/rerun", s.requireSession(s.rerun))
+		m.Handle("POST /runs/{id}/cancel", s.requireSession(s.cancel))
 	}
 	return securityHeaders(m)
 }
@@ -167,7 +208,8 @@ func (s *Server) mux(webhook, web bool) http.Handler {
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'")
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "+
+			"connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("X-Content-Type-Options", "nosniff")

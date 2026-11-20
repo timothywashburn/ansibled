@@ -1,78 +1,163 @@
 {{define "content" -}}
-{{- with .Run}}
-<h1>Run {{.ID}} · <span class="state-{{.State}}">{{.State}}</span></h1>
-<dl>
-  <dt>kind</dt><dd>{{.Kind}}{{if .MR}} {{.MR}}{{end}}</dd>
-  <dt>ref</dt><dd>{{.Ref}}</dd>
-  <dt>commit</dt><dd><code>{{.FullSHA}}</code></dd>
-  <dt>trigger</dt><dd>{{.Trigger}}{{if .By}} by {{.By}}{{end}}</dd>
-  <dt>description</dt><dd>{{.Description}}</dd>
-  <dt>queued</dt><dd>{{.Queued}}</dd>
-  {{- if .Started}}<dt>started</dt><dd>{{.Started}}</dd>{{end}}
-  {{- if .Finished}}<dt>finished</dt><dd>{{.Finished}}</dd>{{end}}
-  {{- if .Duration}}<dt>duration</dt><dd>{{.Duration}}</dd>{{end}}
-</dl>
-{{- end}}
+{{- $run := .Run}}
+<div id="run" data-id="{{$run.ID}}" data-state="{{$run.State}}" data-active="{{if $run.Active}}1{{end}}">
+<div class="runhead">
+  <div class="runtitle">
+    <span id="run-badge">{{template "badge" $run.State}}</span>
+    <h1>Run #{{$run.ID}}</h1>
+    {{template "kind" $run.Kind}}
+  </div>
+  {{- if .CanAct}}
+  <div class="runactions">
+    <form method="post" action="/runs/{{$run.ID}}/rerun">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button class="btn" type="submit" title="{{if eq (print $run.Kind) "mr"}}Runs the merge request's current head again{{else}}Runs the current head of {{$run.Ref}} again{{end}}">{{icon "rerun"}}<span>Re-run</span></button>
+    </form>
+    {{- if $run.Active}}
+    <form method="post" action="/runs/{{$run.ID}}/cancel" data-confirm>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button class="btn danger" type="submit">{{icon "stop"}}<span>Cancel</span></button>
+    </form>
+    {{- end}}
+  </div>
+  {{- end}}
+</div>
 
+<dl class="meta">
+  <div><dt>{{icon "branch"}}Ref</dt><dd class="mono">{{$run.Ref}}</dd></div>
+  <div><dt>{{icon "commit"}}Commit</dt><dd>{{template "commit" $run}}</dd></div>
+  {{- if $run.MR}}<div><dt>{{icon "mr"}}Merge request</dt><dd>{{template "mr" $run}}</dd></div>{{end}}
+  <div><dt>{{icon "user"}}Trigger</dt><dd>{{$run.Trigger}}{{if $run.By}} by {{$run.By}}{{end}}</dd></div>
+  <div><dt>{{icon "queued"}}Queued</dt><dd title="{{$run.Queued}}">{{template "time" $run.QueuedISO}}</dd></div>
+  <div><dt>{{icon "clock"}}Duration</dt><dd id="run-duration">{{if and $run.Active $run.StartedISO}}<span data-elapsed="{{$run.StartedISO}}">{{$run.Duration}}</span>{{else if $run.Duration}}{{$run.Duration}}{{else}}<span class="muted">not started</span>{{end}}</dd></div>
+</dl>
+<p class="rundesc" id="run-desc">{{$run.Description}}</p>
+
+<nav class="tabs" role="tablist">
+  <a href="#summary" role="tab" data-tab="summary">Summary</a>
+  <a href="#changes" role="tab" data-tab="changes">Changes{{if .ChangedTasks}} <span class="count warn">{{.ChangedTasks}}</span>{{end}}{{if .FailedTasks}} <span class="count bad">{{.FailedTasks}}</span>{{end}}</a>
+  <a href="#log" role="tab" data-tab="log">Log</a>
+</nav>
+
+<section class="tabpanel" id="tab-summary" data-panel="summary">
 {{- with .Summary}}
 {{- if .FailedStep}}
-<h2>Error</h2>
-<p>Failed step: <strong>{{.FailedStep}}</strong></p>
-{{- if .Error}}<pre>{{.Error}}</pre>{{end}}
-{{- end}}
-{{- range .Playbooks}}
-<h2>{{.Playbook}} <span class="muted">· exit code {{.ExitCode}}</span></h2>
-{{- if .Hosts}}
-<div class="scroll">
-<table>
-<thead><tr>
-  <th>host</th><th class="num">ok</th><th class="num">would change</th><th class="num">failed</th>
-  <th>unreachable</th><th class="num">skipped</th><th class="num">ignored</th><th class="num">rescued</th>
-</tr></thead>
-<tbody>
-{{- range .Hosts}}
-<tr>
-  <td>{{.Host}}</td>
-  <td class="num">{{.OK}}</td>
-  <td class="num">{{.Changed}}</td>
-  <td class="num{{if .Failed}} state-failed{{end}}">{{.Failed}}</td>
-  <td{{if .Unreachable}} class="state-failed"{{end}}>{{if .Unreachable}}yes{{end}}</td>
-  <td class="num">{{.Skipped}}</td>
-  <td class="num">{{.Ignored}}</td>
-  <td class="num">{{.Rescued}}</td>
-</tr>
-{{- end}}
-</tbody>
-</table>
+<div class="callout bad">
+  <strong>{{icon "error"}} The {{.FailedStep}} step failed</strong>
+  {{- if .Error}}<pre>{{.Error}}</pre>{{end}}
+  <p class="muted">The <a href="#log">log</a> has the details.</p>
 </div>
-{{- range .Hosts}}
-{{- if .ChangedTasks}}
-<h3>{{.Host}}: would change</h3>
-<ul>{{range .ChangedTasks}}<li>{{.}}</li>{{end}}</ul>
-{{- end}}
-{{- if .FailedTasks}}
-<h3 class="state-failed">{{.Host}}: failed</h3>
-<ul>{{range .FailedTasks}}<li>{{.}}</li>{{end}}</ul>
 {{- end}}
 {{- end}}
-{{- else}}
-<p class="muted">No hosts.</p>
+{{- if .Playbooks}}
+{{- range .Playbooks}}
+<section class="card">
+  <div class="cardhead"><h2 class="mono">{{.Playbook}}</h2><span class="muted">exit code {{.ExitCode}}</span></div>
+  {{- if .Hosts}}
+  <div class="tablewrap">
+  <table class="hosts">
+  <thead><tr>
+    <th>Host</th><th class="num">ok</th><th class="num">would change</th><th class="num">failed</th>
+    <th>unreachable</th><th class="num">skipped</th><th class="num">ignored</th><th class="num">rescued</th>
+  </tr></thead>
+  <tbody>
+  {{- range .Hosts}}
+  <tr>
+    <td><a class="host" href="#h-{{.Host}}">{{icon "host"}}{{.Host}}</a></td>
+    <td class="num">{{.OK}}</td>
+    <td class="num">{{if .Changed}}<span class="pill warn">{{.Changed}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
+    <td class="num">{{if .Failed}}<span class="pill bad">{{.Failed}}</span>{{else}}<span class="muted">0</span>{{end}}</td>
+    <td>{{if .Unreachable}}<span class="pill bad">unreachable</span>{{end}}</td>
+    <td class="num muted">{{.Skipped}}</td>
+    <td class="num muted">{{.Ignored}}</td>
+    <td class="num muted">{{.Rescued}}</td>
+  </tr>
+  {{- end}}
+  </tbody>
+  </table>
+  </div>
+  {{- else}}
+  <div class="empty">No hosts.</div>
+  {{- end}}
+</section>
 {{- end}}
+{{- else if not .Summary}}
+<div class="empty">{{if $run.Active}}Results appear here when the run finishes. Follow it in the <a href="#log">log</a>.{{else}}This run has no results.{{end}}</div>
 {{- end}}
-{{- end}}
+</section>
 
-<h2>Log</h2>
-{{- with .Log}}
-{{- if .Expired}}
-<p class="muted">log expired</p>
-{{- else if .Missing}}
-<p class="muted">No log yet.</p>
+<section class="tabpanel" id="tab-changes" data-panel="changes">
+{{- if .DetailsError}}<div class="callout warn">Some results could not be read; the log has everything.</div>{{end}}
+{{- if .LogExpired}}
+<div class="empty">The details of this run were removed by retention.</div>
+{{- else if not .Summary}}
+<div class="empty">{{if $run.Active}}Changes appear here when the run finishes.{{else}}This run has no results.{{end}}</div>
 {{- else}}
-<p class="muted">{{.Size}} · <a href="/runs/{{$.Run.ID}}/log.txt">raw log</a></p>
-{{- if .Truncated}}
-<p class="note">The log is larger than {{.Shown}}; showing only its end. See the <a href="/runs/{{$.Run.ID}}/log.txt">raw log</a> for all of it.</p>
+{{- $multi := gt (len .Playbooks) 1}}
+{{- $any := false}}
+{{- range .Playbooks}}
+{{- if .Details}}{{$any = true}}
+{{- if $multi}}<h2 class="mono">{{.Playbook}}</h2>{{end}}
+<div class="toolbar"><button class="btn ghost small" type="button" data-expand="1">Expand all</button><button class="btn ghost small" type="button" data-expand="0">Collapse all</button></div>
+{{- range .Details}}
+<details class="hostcard" id="h-{{.Host}}" open>
+  <summary>
+    {{icon "chevron"}}{{icon "host"}}<span class="hostname">{{.Host}}</span>
+    {{- if .Changed}}<span class="pill warn">{{.Changed}} would change</span>{{end}}
+    {{- if .Failed}}<span class="pill bad">{{.Failed}} failed</span>{{end}}
+  </summary>
+  <div class="tasks">
+  {{- range .Items}}
+    <div class="task t-{{.Status}}">
+      <div class="taskhead">
+        <span class="pill {{if eq .Status "changed"}}warn{{else}}bad{{end}}">{{if eq .Status "changed"}}would change{{else}}{{.Status}}{{end}}</span>
+        <span class="taskname">{{if .Play}}<span class="muted">{{.Play}} ›</span> {{end}}{{.Task}}</span>
+        {{- if .Action}}<span class="action mono">{{.Action}}</span>{{end}}
+      </div>
+      {{- if .Msg}}<pre class="msg">{{.Msg}}</pre>{{end}}
+      {{- with diffLines .Diff}}<pre class="diff">{{range .}}<span class="dl {{.Class}}">{{.Text}}</span>{{end}}</pre>{{end}}
+    </div>
+  {{- end}}
+  </div>
+</details>
 {{- end}}
-<pre>{{.Text}}</pre>
 {{- end}}
 {{- end}}
+{{- if not $any}}<div class="empty ok-empty">{{icon "success"}} Nothing would change and nothing failed.</div>{{end}}
+{{- end}}
+</section>
+
+<template id="badges">{{range $s := .States}}<span data-state="{{$s}}">{{template "badge" $s}}</span>{{end}}</template>
+
+<section class="tabpanel" id="tab-log" data-panel="log">
+{{- if .LogExpired}}
+<div class="empty">This run's log was removed by retention.</div>
+{{- else}}
+<div class="console" id="console" data-stream="/runs/{{$run.ID}}/stream">
+  <div class="console-bar">
+    <span class="console-status" id="console-status">{{if $run.Active}}{{icon "running"}}<span>live</span>{{else}}<span>{{$run.State}}</span>{{end}}</span>
+    <div class="console-search">
+      <input type="search" id="log-search" placeholder="Search log" aria-label="Search log" autocomplete="off">
+      <span id="log-hits" class="muted"></span>
+      <button class="btn ghost small" type="button" data-act="prev" title="Previous match (Shift+Enter)">↑</button>
+      <button class="btn ghost small" type="button" data-act="next" title="Next match (Enter)">↓</button>
+    </div>
+    <div class="console-tools">
+      <button class="btn ghost small" type="button" data-act="wrap" aria-pressed="false">Wrap</button>
+      <button class="btn ghost small" type="button" data-act="collapse">Collapse</button>
+      <button class="btn ghost small" type="button" data-act="expand">Expand</button>
+      <button class="btn ghost small" type="button" data-act="copy">Copy</button>
+      <a class="btn ghost small" href="/runs/{{$run.ID}}/log.txt" target="_blank" rel="noreferrer">Raw</a>
+      <a class="btn ghost small" href="/runs/{{$run.ID}}/log.txt?download=1">Download</a>
+    </div>
+  </div>
+  <div class="console-body" id="console-body" tabindex="0" aria-label="Run log">
+    {{- if .LogMissing}}<div class="console-wait" id="console-wait">Waiting for output…</div>{{end}}
+  </div>
+  <button class="follow" id="follow" type="button" hidden>↓ <span>Follow</span></button>
+</div>
+<noscript><p class="muted">The live console needs JavaScript. Read the <a href="/runs/{{$run.ID}}/log.txt">raw log</a>.</p></noscript>
+{{- end}}
+</section>
+</div>
 {{- end}}

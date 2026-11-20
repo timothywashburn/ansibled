@@ -47,6 +47,7 @@ const (
 	TriggerStartup  Trigger = "startup"
 	TriggerSchedule Trigger = "schedule"
 	TriggerManual   Trigger = "manual" // run-once CLI
+	TriggerWeb      Trigger = "web"    // re-run button in the web UI
 )
 
 // Key returns the queue key for a kind: runs with the same key supersede each other.
@@ -150,4 +151,23 @@ func (s *Summary) Totals() (changed, failed, unreachable, changedHosts, failedHo
 		}
 	}
 	return changed, failed, unreachable, len(ch), len(fh)
+}
+
+// TaskDetail is one task result on one host that would change something or
+// failed, read back from a run's events file for the web UI.
+type TaskDetail struct {
+	Host   string
+	Play   string
+	Task   string
+	Action string
+	Status string // "changed", "failed" or "unreachable"
+	Diff   string // unified diff (changed results run with --diff), may be empty
+	Msg    string // message of failed and unreachable results
+}
+
+// RunFilter narrows a run listing. Empty fields match everything.
+type RunFilter struct {
+	Kinds  []Kind
+	States []State
+	MRIID  int
 }

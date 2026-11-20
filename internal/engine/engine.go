@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -121,6 +122,20 @@ func (e *Engine) LogPath(id int64) string { return filepath.Join(e.RunDir(id), "
 // EventsPath is <data_dir>/runs/<id>/events-<n>.jsonl for playbook index n.
 func (e *Engine) EventsPath(id int64, n int) string {
 	return filepath.Join(e.RunDir(id), fmt.Sprintf("events-%d.jsonl", n))
+}
+
+// Details reads the changed, failed and unreachable results of playbook n of
+// run id from its events file. A missing file gives (nil, nil).
+func (e *Engine) Details(id int64, n int) ([]model.TaskDetail, error) {
+	f, err := os.Open(e.EventsPath(id, n))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return ParseDetails(f)
 }
 
 // DeleteRunFiles removes a run's directory (log and events), for retention.

@@ -1,36 +1,31 @@
 {{define "content" -}}
-<h1>Runs</h1>
-{{- if .Runs}}
-<div class="scroll">
-<table>
-<thead><tr>
-  <th class="num">id</th><th>kind</th><th>MR</th><th>ref</th><th>commit</th><th>trigger</th><th>by</th>
-  <th>state</th><th>description</th><th>queued</th><th>duration</th>
-</tr></thead>
-<tbody>
-{{- range .Runs}}
-<tr>
-  <td class="num"><a href="/runs/{{.ID}}">{{.ID}}</a></td>
-  <td>{{.Kind}}</td>
-  <td>{{.MR}}</td>
-  <td>{{.Ref}}</td>
-  <td><code title="{{.FullSHA}}">{{.SHA}}</code></td>
-  <td>{{.Trigger}}</td>
-  <td>{{.By}}</td>
-  <td class="state-{{.State}}">{{.State}}</td>
-  <td>{{.Description}}</td>
-  <td class="muted">{{.Queued}}</td>
-  <td>{{.Duration}}</td>
-</tr>
-{{- end}}
-</tbody>
-</table>
+<div class="pagehead">
+  <h1>Runs</h1>
+  <form class="filters" method="get" action="/runs" data-autosubmit>
+    <label><span>Kind</span>
+      <select name="kind"><option value="">all</option>{{range .Kinds}}<option value="{{.}}"{{if eq . $.Kind}} selected{{end}}>{{if eq . "mr"}}MR{{else}}{{.}}{{end}}</option>{{end}}</select>
+    </label>
+    <label><span>State</span>
+      <select name="state"><option value="">all</option>{{range .States}}<option value="{{.}}"{{if eq . $.State}} selected{{end}}>{{.}}</option>{{end}}</select>
+    </label>
+    <label><span>MR</span><input name="mr" inputmode="numeric" placeholder="!42" value="{{.MR}}" size="5"></label>
+    <button class="btn" type="submit">Filter</button>
+    {{- if .Filters}}<a class="btn ghost" href="/runs">Clear</a>{{end}}
+  </form>
 </div>
+<div id="live" data-live="{{if eq .Page 1}}5000{{end}}">
+{{template "runs-live" .}}
+</div>
+{{- end}}
+
+{{define "runs-live" -}}
+{{- if .Runs}}
+{{template "run-table" .Runs}}
 {{- else}}
-<p class="muted">No runs{{if gt .Page 1}} on this page{{end}}.</p>
+<div class="empty">No runs{{if .Filters}} match these filters{{end}}{{if gt .Page 1}} on this page{{end}}.</div>
 {{- end}}
 <nav class="pager">
-  {{- if .PrevPage}}<a href="/runs?page={{.PrevPage}}">← newer</a>{{end}}
-  {{- if .NextPage}}<a href="/runs?page={{.NextPage}}">older →</a>{{end}}
+  {{- if .PrevURL}}<a class="btn ghost" href="{{.PrevURL}}">← Newer</a>{{end}}
+  {{- if .NextURL}}<a class="btn ghost" href="{{.NextURL}}">Older →</a>{{end}}
 </nav>
 {{- end}}

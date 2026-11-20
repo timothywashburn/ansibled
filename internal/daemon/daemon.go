@@ -32,6 +32,7 @@ const forgeTimeout = 20 * time.Second
 type Enqueuer interface {
 	Enqueue(ctx context.Context, req queue.Request) (*model.Run, bool, error)
 	CancelKey(ctx context.Context, key, reason string) error
+	CancelRun(ctx context.Context, id int64, reason string) error
 }
 
 // Files is the part of the engine the daemon uses for housekeeping.
@@ -319,6 +320,74 @@ func (d *Daemon) enqueue(ctx context.Context, req queue.Request) (bool, error) {
 		d.log.Info("queued run", "run", r.ID, "kind", r.Kind, "mr", r.MRIID, "sha", r.ShortSHA(), "trigger", r.Trigger, "by", r.TriggeredBy)
 	}
 	return queued, nil
+}
+
+// ---------------------------------------------------------------------------
+// Web UI actions
+
+// ActionError is an error whose message can be shown to the person who
+// pressed a button.
+type ActionError string
+
+func (e ActionError) Error() string { return string(e) }
+
+// Rerun queues run id again for user, who signed in to the web UI. An MR run
+// runs the MR's current head (as `/ansibled check` does), so a stale commit
+// never overwrites the MR's status; main and nightly runs run the current
+// head of the default branch. It returns the new run.
+func (d *Daemon) Rerun(ctx context.Context, id int64, user string) (*model.Run, error) {
+	ctx, cancel := context.WithTimeout(ctx, forgeTimeout)
+	defer cancel()
+	old, err := d.store.GetRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if old == nil {
+		return nil, ActionError("there is no such run")
+	}
+	req := queue.Request{Kind: old.Kind, Trigger: model.TriggerWeb, TriggeredBy: user, Force: true}
+	switch old.Kind {
+	case model.KindMR:
+		mr, err := d.forge.GetMR(ctx, old.MRIID)
+		if err != nil {
+			return nil, fmt.Errorf("get MR !%d: %w", old.MRIID, err)
+		}
+		if mr.State != "opened" {
+			return nil, ActionError(fmt.Sprintf("merge request !%d is %s", mr.IID, mr.State))
+		}
+		req.SHA, req.Ref, req.MRIID = mr.HeadSHA, mr.SourceBranch, mr.IID
+	default:
+		def, err := d.forge.DefaultBranch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("default branch: %w", err)
+		}
+		head, err := d.forge.BranchHead(ctx, def)
+		if err != nil {
+			return nil, fmt.Errorf("head of %s: %w", def, err)
+		}
+		req.SHA, req.Ref = head, def
+	}
+	if req.SHA == "" {
+		return nil, ActionError("the forge returned no commit to run")
+	}
+	r, _, err := d.Queue.Enqueue(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	d.log.Info("re-run from the web UI", "of", id, "run", r.ID, "kind", r.Kind, "sha", r.ShortSHA(), "by", user)
+	return r, nil
+}
+
+// Cancel cancels queued or running run id for user, who signed in to the web UI.
+func (d *Daemon) Cancel(ctx context.Context, id int64, user string) error {
+	err := d.Queue.CancelRun(ctx, id, "canceled by "+user)
+	if errors.Is(err, queue.ErrNotActive) {
+		return ActionError("the run has already finished")
+	}
+	if err == nil {
+		d.log.Info("canceled from the web UI", "run", id, "by", user)
+	}
+	return err
 }
 
 // ---------------------------------------------------------------------------

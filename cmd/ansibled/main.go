@@ -205,6 +205,8 @@ func serve(path string, log *slog.Logger) error {
 		SignIn:       signIn,
 		Runs:         st,
 		LogPath:      eng.LogPath,
+		Details:      eng.Details,
+		Actions:      d,
 		Metrics:      m,
 		MetricsToken: sec.metricsToken,
 		SessionKey:   sec.sessionKey,

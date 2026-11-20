@@ -121,6 +121,8 @@ the nightly run is skipped (that run updates the same metrics).
 - **Dedupe**: queueing (K, sha) is a no-op if a run for (K, sha) is already
   queued, running, or finished (unless the trigger is a `/ansibled check` comment,
   which always runs).
+- **Cancel**: the web UI cancels one run by id (`CancelRun`), with
+  description "canceled by <user>".
 - Queue state lives in SQLite, so it survives restarts. On startup, runs that
   were `running` are reset to `queued` and run again.
 - Per-run timeout: `ansible.timeout` (default 45m) → state `error`.
@@ -166,7 +168,9 @@ Each run gets `data_dir/runs/<id>/`:
    - `ANSIBLE_CALLBACK_PLUGINS=<callback dir>` (default `/usr/share/ansibled/callback_plugins`, overridable with the `ANSIBLED_CALLBACK_DIR` env var of the daemon), appended to any existing value
    - `ANSIBLE_CALLBACKS_ENABLED=ansibled_events`
    - `ANSIBLED_EVENTS_FILE=runs/<id>/events-<n>.jsonl` (one file per playbook, `n` = index in `ansible.playbooks`)
-   - `ANSIBLE_NOCOLOR=1`, `ANSIBLE_RETRY_FILES_ENABLED=0`, `ANSIBLE_LOG_PATH=` (unset)
+   - `ANSIBLE_FORCE_COLOR=1` (the web console renders the colours; the raw log
+     download strips them; `ANSIBLE_NOCOLOR=1` in `ansible.env` turns them off),
+     `ANSIBLE_RETRY_FILES_ENABLED=0`, `ANSIBLE_LOG_PATH=` (unset)
    - `ansible.env` from config last
    stdout+stderr of every step go to `runs/<id>/log.txt` with a header line per step.
    The process runs in its own process group (`Setpgid`) so cancellation reaches ssh children.
@@ -188,14 +192,18 @@ default stdout stays the human-readable log. It writes one JSON object per line:
 ```json
 {"event":"play_start","playbook":"site.yml","play":"compute + login nodes"}
 {"event":"task_start","play":"...","task":"docker : podman restart service","path":"roles/docker/tasks/main.yml:51"}
-{"event":"result","status":"ok|changed|failed|unreachable|skipped","host":"web1","task":"...","action":"ansible.builtin.copy","ignore_errors":false,"msg":"..."}
+{"event":"result","status":"ok|changed|failed|unreachable|skipped","host":"web1","play":"...","task":"...","action":"ansible.builtin.copy","ignore_errors":false,"msg":"...","diff":"--- before\n+++ after\n..."}
 {"event":"stats","hosts":{"web1":{"ok":30,"changed":3,"failures":0,"unreachable":0,"skipped":4,"rescued":0,"ignored":0}}}
 ```
 
 It only hooks task-level `v2_runner_on_*` results (not per loop item), plus
 `v2_playbook_on_play_start`, `v2_playbook_on_task_start`,
 `v2_playbook_on_handler_task_start` and `v2_playbook_on_stats`. `msg` is
-truncated to 2000 characters. It must work on ansible-core 2.15+.
+truncated to 4000 characters. `changed` results carry `diff`: the `--diff`
+output of the task and of its changed loop items, rendered as ansible prints it
+(`CallbackBase._get_diff`) without colour, truncated to 64 KiB. The web UI's
+Changes tab reads these files back (`engine.ParseDetails`). It must work on
+ansible-core 2.15+.
 
 ### Result
 
@@ -281,13 +289,37 @@ Example alert rules live in `docs/alerts.yml`; deployments own their real rules.
 Two listeners (they may be the same address):
 
 - `listen.webhook`: only `POST /webhook/<forge>` and `GET /healthz`.
-- `listen.web`: `/runs`, `/runs/<id>`, `/runs/<id>/log.txt`, `/login`,
+- `listen.web`: the UI pages below, `/static/<file>`, `/login`,
   `/oauth/callback`, `/logout`, `/metrics`, `/healthz`.
 
 Binding retries every 5 s until the address exists (it may be on an interface
 that comes up after the container, e.g. a VPN), instead of exiting.
 
-The log pages are server-rendered with `html/template`, no JavaScript needed.
+Pages (all behind sign-in):
+
+| path | what |
+|---|---|
+| `/` | Overview: latest main and nightly result, drift per host (from the last nightly run, or main until there is one), active runs, recent runs. |
+| `/runs?kind=&state=&mr=&page=` | Run list with filters, 50 per page. |
+| `/runs/<id>` | Run page: status, ref, commit and MR links (when the forge provides them), trigger, duration; tabs **Summary** (per-host counts), **Changes** (per host, the tasks that would change with their diffs and the tasks that failed with their messages) and **Log** (the live console). Re-run and Cancel buttons. |
+| `/runs/<id>/stream` | Server-Sent Events: `run` (state, at the start and on every change), `log` (new complete lines, `id:` = byte offset, so a reconnecting browser resumes with `Last-Event-ID`), `done`. The log file is polled every 250 ms and the run every second. A first connection to a log larger than 2 MiB starts at its last 2 MiB. |
+| `/runs/<id>/log.txt` | Raw log without colour codes; `?ansi=1` keeps them, `?download=1` makes it an attachment. |
+| `POST /runs/<id>/rerun`, `POST /runs/<id>/cancel` | Buttons. Re-run queues the run's kind again (trigger `web`, forced): an MR run at the MR's current head (refused if the MR is not open), a main or nightly run at the current head of the default branch, so an old commit never overwrites newer results. Cancel cancels that one queued or running run ("canceled by <user>"). |
+
+Pages are server-rendered with `html/template`; one embedded script
+(`internal/web/static/app.js`, no dependencies) adds the console, tabs, live
+refresh of the overview and run list every 5 s, and relative times. Without
+JavaScript every page still renders, and the log is available raw. The CSP
+allows only same-origin scripts, styles and connections. Forms carry a CSRF
+token (an HMAC of the session) and are refused when the browser labels them
+cross-site (`Sec-Fetch-Site`). Anyone allowed to sign in may press the buttons.
+
+The console: one section per engine step (collapsible, with exit code and
+duration; successful steps other than `ansible` collapse when they finish),
+ansible's ANSI colours, line numbers, search, wrap, copy and download. It
+follows the end of the log; scrolling up pauses that and shows a "Follow"
+button.
+
 Sign-in uses **generic OpenID Connect** (`internal/oidc`), so any provider works
 (authentik, Keycloak, Google, ...). It is independent of the forge: who may
 *read logs* is decided by the provider's groups claim (`web.oidc.allowed_groups`),
@@ -328,7 +360,8 @@ Flow (authorization code with PKCE `S256` and `state`, confidential client):
 
 Cookie names include the site (`ansibled_session_<site>`, `ansibled_oauth_<site>`)
 so several instances on one host don't collide. Errors and logs never contain
-tokens or the client secret. Expired runs (past retention) show "log expired".
+tokens or the client secret. Expired runs (past retention) keep their summary,
+but their log and Changes details are gone.
 
 ## Forge interface
 

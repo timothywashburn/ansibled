@@ -236,7 +236,7 @@ func TestRunSuccessAndReuse(t *testing.T) {
 		"\nANSIBLE_CALLBACKS_ENABLED=timer,ansibled_events\n",
 		"\nANSIBLE_PRIVATE_KEY_FILE=/nonexistent/ssh_key\n",
 		"\nANSIBLE_REMOTE_USER=ansibled\n",
-		"\nANSIBLE_NOCOLOR=1\n",
+		"\nANSIBLE_FORCE_COLOR=1\n",
 		"\nANSIBLE_RETRY_FILES_ENABLED=0\n",
 		"\nANSIBLED_EVENTS_FILE=" + h.e.EventsPath(1, 0) + "\n",
 		"run 1 finished: success",
