@@ -1,0 +1,63 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "3b1d9e8f7a6c5b4d3e2f1a0b9c8d7e6f5a4b3c2d",
+  "after": "9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+  "ref": "refs/heads/feature/vlan-42",
+  "ref_protected": false,
+  "checkout_sha": "9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+  "message": null,
+  "user_id": 42,
+  "user_name": "Alice Admin",
+  "user_username": "alice",
+  "user_email": "",
+  "user_avatar": "https://gitlab.example.org/uploads/-/system/user/avatar/42/avatar.png",
+  "project_id": 17,
+  "project": {
+    "id": 17,
+    "name": "infra",
+    "description": "Infrastructure as code",
+    "web_url": "https://gitlab.example.org/myorg/infra",
+    "avatar_url": null,
+    "git_ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "git_http_url": "https://gitlab.example.org/myorg/infra.git",
+    "namespace": "myorg",
+    "visibility_level": 0,
+    "path_with_namespace": "myorg/infra",
+    "default_branch": "main",
+    "ci_config_path": "",
+    "homepage": "https://gitlab.example.org/myorg/infra",
+    "url": "git@gitlab.example.org:myorg/infra.git",
+    "ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "http_url": "https://gitlab.example.org/myorg/infra.git"
+  },
+  "commits": [
+    {
+      "id": "9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+      "message": "network: add vlan 42 to compute nodes\n",
+      "title": "network: add vlan 42 to compute nodes",
+      "timestamp": "2026-11-18T21:14:03+00:00",
+      "url": "https://gitlab.example.org/myorg/infra/-/commit/9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+      "author": {
+        "name": "Someone Else",
+        "email": "spoofed@example.org"
+      },
+      "added": [],
+      "modified": [
+        "ansible/roles/network/tasks/main.yml"
+      ],
+      "removed": []
+    }
+  ],
+  "total_commits_count": 1,
+  "push_options": {},
+  "repository": {
+    "name": "infra",
+    "url": "git@gitlab.example.org:myorg/infra.git",
+    "description": "Infrastructure as code",
+    "homepage": "https://gitlab.example.org/myorg/infra",
+    "git_http_url": "https://gitlab.example.org/myorg/infra.git",
+    "git_ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "visibility_level": 0
+  }
+}

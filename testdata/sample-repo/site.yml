@@ -1,0 +1,36 @@
+---
+# Extra vars understood by this playbook:
+#   fail_me=true      make "fail on request" fail
+#   sleep_seconds=N   run a slow remote command first (cancellation tests)
+- name: Sample site
+  hosts: all
+  gather_facts: false
+  vars:
+    fail_me: false
+    sleep_seconds: 0
+  tasks:
+    - name: Slow remote command
+      ansible.builtin.command: sleep {{ sleep_seconds | int }}
+      check_mode: false
+      changed_when: false
+      when: sleep_seconds | int > 0
+
+    - name: Ping target
+      ansible.builtin.ping:
+
+    - name: Render sample config
+      ansible.builtin.template:
+        src: templates/sample.conf.j2
+        dest: /etc/ansibled-sample.conf
+        mode: "0644"
+
+    - name: Tolerated failure
+      ansible.builtin.command: /bin/false
+      check_mode: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Fail on request
+      ansible.builtin.fail:
+        msg: fail_me is set
+      when: fail_me | bool

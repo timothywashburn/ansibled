@@ -1,0 +1,36 @@
+{{define "content" -}}
+<h1>Runs</h1>
+{{- if .Runs}}
+<div class="scroll">
+<table>
+<thead><tr>
+  <th class="num">id</th><th>kind</th><th>MR</th><th>ref</th><th>commit</th><th>trigger</th><th>by</th>
+  <th>state</th><th>description</th><th>queued</th><th>duration</th>
+</tr></thead>
+<tbody>
+{{- range .Runs}}
+<tr>
+  <td class="num"><a href="/runs/{{.ID}}">{{.ID}}</a></td>
+  <td>{{.Kind}}</td>
+  <td>{{.MR}}</td>
+  <td>{{.Ref}}</td>
+  <td><code title="{{.FullSHA}}">{{.SHA}}</code></td>
+  <td>{{.Trigger}}</td>
+  <td>{{.By}}</td>
+  <td class="state-{{.State}}">{{.State}}</td>
+  <td>{{.Description}}</td>
+  <td class="muted">{{.Queued}}</td>
+  <td>{{.Duration}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- else}}
+<p class="muted">No runs{{if gt .Page 1}} on this page{{end}}.</p>
+{{- end}}
+<nav class="pager">
+  {{- if .PrevPage}}<a href="/runs?page={{.PrevPage}}">← newer</a>{{end}}
+  {{- if .NextPage}}<a href="/runs?page={{.NextPage}}">older →</a>{{end}}
+</nav>
+{{- end}}

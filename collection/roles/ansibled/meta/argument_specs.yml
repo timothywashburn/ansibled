@@ -1,0 +1,235 @@
+---
+argument_specs:
+  main:
+    short_description: Run the ansibled daemon container on a host.
+    description:
+      - Renders the ansibled config, secrets, SSH key and overlay under O(ansibled_dir),
+        and runs the container with Docker Compose (C(community.docker.docker_compose_v2)).
+      - Sets the facts C(ansibled_public_key), C(ansibled_webhook_secret_effective)
+        and C(ansibled_metrics_token_effective) for later plays.
+    options:
+      ansibled_image:
+        type: str
+        default: ghcr.io/timothywashburn/ansibled:latest
+        description: Container image.
+      ansibled_pull:
+        type: str
+        default: always
+        choices: [always, missing, never]
+        description: When to pull the image.
+      ansibled_container_name:
+        type: str
+        default: ansibled-<site>
+        description: Container name, also used as the Compose project name.
+      ansibled_dir:
+        type: path
+        default: /opt/ansibled
+        description: Host directory for compose.yml, etc/ and data/.
+      ansibled_uid:
+        type: int
+        default: 10001
+        description: uid the container runs as (owner of secrets, overlay and data).
+      ansibled_gid:
+        type: int
+        default: 10001
+        description: gid the container runs as.
+
+      ansibled_config:
+        type: dict
+        required: true
+        description:
+          - The ansibled.yml settings. Container-side paths (secret files, C(overlay_dir),
+            C(data_dir), C(ansible.ssh_key_file)) are set by the role and must not be given.
+        options:
+          site:
+            type: str
+            required: true
+            description: Site name (status name C(ansibled/<site>)).
+          public_url:
+            type: str
+            required: true
+            description: Base URL of the web listener, for links and the OAuth redirect.
+          listen:
+            type: dict
+            required: true
+            options:
+              webhook:
+                type: str
+                required: true
+                description: host:port of the webhook listener.
+              web:
+                type: str
+                required: true
+                description: host:port of the web UI and metrics listener.
+          forge:
+            type: dict
+            required: true
+            options:
+              type:
+                type: str
+                choices: [gitlab]
+                description: Forge type.
+              url:
+                type: str
+                required: true
+                description: GitLab base URL.
+              project:
+                type: str
+                required: true
+                description: Project path (C(myorg/infra)) or numeric id.
+              trusted_group:
+                type: str
+                required: true
+                description: Group whose members may trigger runs.
+              clone_url:
+                type: str
+                description: Override for the git fetch URL (mirrors, tests).
+          repo:
+            type: dict
+            required: true
+            options:
+              workdir:
+                type: str
+                description: Ansible project directory relative to the repo root.
+              setup:
+                type: str
+                required: true
+                description: Command that builds the Python environment.
+              venv_key_files:
+                type: list
+                elements: str
+                required: true
+                description: Files whose content keys the cached venv.
+              collections_requirements:
+                type: str
+                description: Collections requirements file, relative to the workdir.
+          ansible:
+            type: dict
+            required: true
+            options:
+              inventory:
+                type: str
+                required: true
+                description: Inventory, relative to the workdir.
+              playbooks:
+                type: list
+                elements: str
+                required: true
+                description: Playbooks to dry-run, in order.
+              extra_args:
+                type: list
+                elements: str
+                description: Extra C(ansible-playbook) arguments.
+              remote_user:
+                type: str
+                description: SSH user (the ansibled_target user).
+              timeout:
+                type: str
+                description: Run timeout, e.g. C(45m).
+              env:
+                type: dict
+                description: Extra environment variables for Ansible.
+          schedule:
+            type: dict
+            options:
+              nightly:
+                type: str
+                description: 5-field cron expression; omit to disable.
+              timezone:
+                type: str
+                description: Timezone of the schedule.
+          retention:
+            type: str
+            description: How long run logs are kept, e.g. C(720h).
+
+      ansibled_forge_token:
+        type: str
+        no_log: true
+        description:
+          - GitLab project access token (Developer, scopes api and read_repository).
+          - Required on the first deploy. When undefined later, the file already on the host is kept.
+      ansibled_oauth_client_id:
+        type: str
+        no_log: true
+        description:
+          - GitLab OAuth application id.
+          - Required on the first deploy. When undefined later, the file already on the host is kept.
+      ansibled_oauth_client_secret:
+        type: str
+        no_log: true
+        description:
+          - GitLab OAuth application secret.
+          - Required on the first deploy. When undefined later, the file already on the host is kept.
+      ansibled_webhook_secret:
+        type: str
+        no_log: true
+        description: Webhook secret token. Generated once and kept on the host if undefined.
+      ansibled_metrics_token:
+        type: str
+        no_log: true
+        description: Bearer token for C(/metrics). Generated once and kept on the host if undefined.
+      ansibled_session_key:
+        type: str
+        no_log: true
+        description: Web session signing key. Generated once and kept on the host if undefined.
+      ansibled_ssh_key_comment:
+        type: str
+        default: ansibled@<site>
+        description: Comment of the generated SSH key.
+
+      ansibled_overlay_files:
+        type: list
+        elements: dict
+        default: []
+        description: Files copied over every checkout (gitignored secrets, state files).
+        options:
+          path:
+            type: str
+            required: true
+            description: Path relative to the repo root. Must stay inside it.
+          content:
+            type: str
+            description: File content (one of O(ansibled_overlay_files[].content) or O(ansibled_overlay_files[].src)).
+          src:
+            type: str
+            description: File on the controller to copy.
+          mode:
+            type: raw
+            default: "0600"
+            description: File mode; the file is owned by O(ansibled_uid).
+      ansibled_overlay_prune:
+        type: bool
+        default: false
+        description: Delete overlay files that are not in O(ansibled_overlay_files).
+
+      ansibled_manage_firewalld:
+        type: bool
+        default: false
+        description: Open both listen ports in firewalld.
+      ansibled_firewalld_zone:
+        type: str
+        default: public
+        description: firewalld zone for the listen ports.
+
+      ansibled_gitlab_hook_token:
+        type: str
+        no_log: true
+        description:
+          - When defined, ensure the project webhook exists (delegated to the controller,
+            which needs C(python-gitlab)). Needs the Maintainer role and api scope.
+      ansibled_gitlab_hook_url:
+        type: str
+        default: http://<listen.webhook>/webhook/gitlab
+        description: URL GitLab sends webhooks to.
+      ansibled_gitlab_api_url:
+        type: str
+        default: <forge.url>
+        description: GitLab base URL for the API.
+      ansibled_gitlab_validate_certs:
+        type: bool
+        default: true
+        description: Verify TLS when talking to the GitLab API.
+      ansibled_gitlab_hook_validate_certs:
+        type: bool
+        default: true
+        description: GitLab verifies the hook URL's TLS certificate (https hook URLs only).

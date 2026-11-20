@@ -1,0 +1,62 @@
+---
+# Container image and how to pull it: always | missing | never.
+ansibled_image: ghcr.io/timothywashburn/ansibled:latest
+ansibled_pull: always
+ansibled_container_name: "ansibled-{{ ansibled_config.site }}"
+
+# Host directory holding compose.yml, etc/ (config, secrets, overlay) and data/.
+ansibled_dir: /opt/ansibled
+
+# The image runs as this uid/gid; secrets, overlay and data are owned by it.
+ansibled_uid: 10001
+ansibled_gid: 10001
+
+# Required: the ansibled.yml settings (see DESIGN.md "Configuration"), without
+# the container paths (secret files, overlay_dir, data_dir, ansible.ssh_key_file),
+# which the role sets itself. Example:
+# ansibled_config:
+#   site: mysite
+#   public_url: http://10.0.0.1:8471
+#   listen: {webhook: "10.0.0.1:8470", web: "10.0.0.1:8471"}
+#   forge: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins}
+#   repo: {setup: uv sync --frozen --no-dev, venv_key_files: [pyproject.toml, uv.lock]}
+#   ansible: {inventory: inventories/mysite, playbooks: [site.yml], remote_user: ansibled}
+#   schedule: {nightly: "0 4 * * *", timezone: America/Los_Angeles}
+
+# Secrets needed on the first deploy only. When undefined on later runs, the
+# files already on the host are kept (keep them out of the repo ansibled checks,
+# e.g. pass them once with -e @secrets.yml from a gitignored file):
+# ansibled_forge_token:          GitLab project access token (api, read_repository)
+# ansibled_oauth_client_id:      GitLab OAuth application id
+# ansibled_oauth_client_secret:  GitLab OAuth application secret
+#
+# Optional secrets. When undefined, a random 48-character value is generated the
+# first time and kept on the host afterwards:
+# ansibled_webhook_secret:
+# ansibled_metrics_token:
+# ansibled_session_key:
+
+# Comment of the generated SSH key.
+ansibled_ssh_key_comment: "ansibled@{{ ansibled_config.site }}"
+
+# Files copied over every checkout, relative to the repo root:
+# - {path: ansible/.vault-pass, content: "{{ vault_pass }}", mode: "0400"}
+# - {path: ansible/files/state.json, src: files/state.json}
+ansibled_overlay_files: []
+# Delete files in the overlay directory that are not in ansibled_overlay_files.
+ansibled_overlay_prune: false
+
+# Open both listen ports in firewalld.
+ansibled_manage_firewalld: false
+ansibled_firewalld_zone: public
+
+# GitLab project webhook registration (runs on the controller, needs python-gitlab
+# there). Enabled when ansibled_gitlab_hook_token is defined: a token with the
+# Maintainer role and api scope on the project.
+# ansibled_gitlab_hook_token:
+ansibled_gitlab_hook_url: "http://{{ ansibled_config.listen.webhook }}/webhook/gitlab"
+ansibled_gitlab_api_url: "{{ ansibled_config.forge.url }}"
+# Verify TLS when talking to the GitLab API.
+ansibled_gitlab_validate_certs: true
+# Let GitLab verify the TLS certificate of the hook URL (only matters for https).
+ansibled_gitlab_hook_validate_certs: true

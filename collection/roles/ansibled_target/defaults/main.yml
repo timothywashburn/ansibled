@@ -1,0 +1,19 @@
+---
+# present: create the user, key and sudo rule. absent: remove all of it.
+ansibled_target_state: present
+
+# Local (system) account ansibled logs in as. It lives in /etc/passwd, never in a
+# directory service, so it keeps working when FreeIPA/LDAP is down.
+ansibled_target_user: ansibled
+ansibled_target_home: /var/lib/ansibled
+
+# Required: the daemon's public key (a string, or a list of keys), e.g.
+# "{{ hostvars[groups['ansibled'][0]].ansibled_public_key }}".
+# ansibled_target_public_key:
+
+# Addresses/CIDRs/patterns the key may be used from (sshd "from=" option).
+# Empty: no restriction.
+ansibled_target_from: []
+
+# Manage the ssh_home_t file context on SELinux hosts.
+ansibled_target_manage_selinux: true

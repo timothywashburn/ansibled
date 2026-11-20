@@ -2,3 +2,10 @@
 .vscode/
 .DS_Store
 ignore-*
+/bin/
+/dist/
+/tmp/
+*.db
+__pycache__/
+*.pyc
+.venv/

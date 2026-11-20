@@ -1,0 +1,52 @@
+# Example ansibled configuration. Every key is described in DESIGN.md ("Configuration").
+# Secrets are referenced by file path only.
+
+site: mysite
+public_url: http://10.0.0.1:8471
+
+listen:
+  webhook: 10.0.0.1:8470
+  web: 10.0.0.1:8471
+
+forge:
+  type: gitlab
+  url: https://gitlab.example.org
+  project: myorg/infra
+  token_file: /etc/ansibled/secrets/forge_token
+  webhook_secret_file: /etc/ansibled/secrets/webhook_secret
+  trusted_group: myorg/sysadmins
+  oauth:
+    client_id_file: /etc/ansibled/secrets/oauth_client_id
+    client_secret_file: /etc/ansibled/secrets/oauth_client_secret
+
+repo:
+  workdir: .
+  # uv project:
+  setup: uv sync --frozen --no-dev
+  venv_key_files: [pyproject.toml, uv.lock]
+  # plain requirements.txt instead:
+  # setup: uv venv "$ANSIBLED_VENV" && uv pip install -p "$ANSIBLED_VENV" -r requirements.txt
+  # venv_key_files: [requirements.txt]
+  collections_requirements: requirements.yml
+
+ansible:
+  inventory: inventories/prod
+  playbooks: [site.yml]
+  extra_args: []
+  remote_user: ansibled
+  ssh_key_file: /etc/ansibled/secrets/ssh_key
+  timeout: 45m
+  env: {}
+
+overlay_dir: /etc/ansibled/overlay
+data_dir: /var/lib/ansibled
+
+schedule:
+  nightly: "0 4 * * *"
+  timezone: America/Los_Angeles
+
+retention: 720h
+
+web:
+  metrics_token_file: /etc/ansibled/secrets/metrics_token
+  session_key_file: /etc/ansibled/secrets/session_key

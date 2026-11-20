@@ -1,0 +1,26 @@
+---
+- name: Validate the role variables
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Create the directory layout
+  ansible.builtin.import_tasks: layout.yml
+
+- name: Write the secrets and the SSH key
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Write the overlay
+  ansible.builtin.import_tasks: overlay.yml
+
+- name: Render ansibled.yml and compose.yml
+  ansible.builtin.import_tasks: config.yml
+
+- name: Open the listen ports in firewalld
+  ansible.builtin.import_tasks: firewalld.yml
+  when: ansibled_manage_firewalld | bool
+
+- name: Run the container
+  ansible.builtin.import_tasks: compose.yml
+
+- name: Register the GitLab project webhook
+  ansible.builtin.import_tasks: webhook.yml
+  when: ansibled_gitlab_hook_token is defined

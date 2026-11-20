@@ -1,0 +1,15 @@
+---
+# In check mode on the first run compose.yml has not been written yet.
+- name: Check for compose.yml
+  ansible.builtin.stat:
+    path: "{{ ansibled_dir }}/compose.yml"
+  register: _ansibled_compose_file
+
+- name: Start the ansibled container
+  community.docker.docker_compose_v2:
+    project_src: "{{ ansibled_dir }}"
+    pull: "{{ ansibled_pull }}"
+    remove_orphans: true
+    state: present
+  register: _ansibled_compose_up
+  when: _ansibled_compose_file.stat.exists

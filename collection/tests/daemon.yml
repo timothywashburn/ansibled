@@ -1,0 +1,60 @@
+# Deploys the ansibled role into the docker:dind container.
+# Secrets: pass -e @secrets.yml on the first deploy only (like a real deployment
+# would from a gitignored file); later runs must work without them.
+# Extra vars:
+#   test_image        image to run (default ghcr.io/timothywashburn/ansibled:latest)
+#   test_pull         ansibled_pull (default never: the image is loaded by run.sh)
+#   ansibled_gitlab_hook_token / ansibled_gitlab_api_url  pass both to test webhook
+#                     registration against fake_gitlab.py
+#   test_overlay_set  "a" (default) or "b": two overlay file sets, to test pruning
+- name: Deploy the ansibled daemon
+  hosts: daemon
+  gather_facts: false
+  vars:
+    _overlay_sets:
+      a:
+        - {path: ansible/.vault-pass, content: "not-a-real-vault-password\n", mode: "0400"}
+        - {path: ansible/group_vars/all/secret.yml, content: "secret_value: 42\n"}
+        - {path: top.txt, content: "top level\n", mode: "0644"}
+      b:
+        - {path: ansible/.vault-pass, content: "not-a-real-vault-password\n", mode: "0400"}
+  roles:
+    - role: timothywashburn.ansibled.ansibled
+      vars:
+        ansibled_image: "{{ test_image | default('ghcr.io/timothywashburn/ansibled:latest') }}"
+        ansibled_pull: "{{ test_pull | default('never') }}"
+        ansibled_config:
+          site: testsite
+          public_url: http://127.0.0.1:8471
+          listen:
+            webhook: 127.0.0.1:8470
+            web: 127.0.0.1:8471
+          forge:
+            url: https://gitlab.example.org
+            project: myorg/infra
+            trusted_group: myorg/sysadmins
+          repo:
+            workdir: ansible
+            setup: uv sync --frozen --no-dev
+            venv_key_files: [pyproject.toml, uv.lock]
+            collections_requirements: requirements.yml
+          ansible:
+            inventory: inventories/testsite
+            playbooks: [site.yml]
+            remote_user: ansibled
+            timeout: 45m
+            env:
+              ANSIBLE_FORKS: "10"
+          schedule:
+            nightly: "0 4 * * *"
+            timezone: America/Los_Angeles
+          retention: 720h
+        ansibled_overlay_files: "{{ _overlay_sets[test_overlay_set | default('a')] }}"
+        ansibled_overlay_prune: true
+  post_tasks:
+    - name: Show the facts the role exports
+      ansible.builtin.debug:
+        msg:
+          public_key: "{{ ansibled_public_key | default('(not yet, check mode)') }}"
+          webhook_secret_length: "{{ ansibled_webhook_secret_effective | length }}"
+          metrics_token_length: "{{ ansibled_metrics_token_effective | length }}"

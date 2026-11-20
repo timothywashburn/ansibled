@@ -1,0 +1,151 @@
+---
+- name: Check that a public key was given
+  ansible.builtin.assert:
+    that:
+      - ansibled_target_public_key is defined
+      - ansibled_target_public_key is string or
+        (ansibled_target_public_key is sequence and ansibled_target_public_key is not mapping)
+    fail_msg: ansibled_target_public_key is required (a public key string, or a list of them)
+    quiet: true
+
+- name: Normalize the public keys
+  ansible.builtin.set_fact:
+    _ansibled_target_keys: >-
+      {{ ([ansibled_target_public_key] if ansibled_target_public_key is string else ansibled_target_public_key)
+         | map('string') | map('split', '\n') | flatten
+         | map('trim') | reject('equalto', '') | list }}
+
+- name: Check the public keys and source addresses
+  ansible.builtin.assert:
+    that:
+      - _ansibled_target_keys | length > 0
+      # Plain keys only: the role sets the options itself.
+      - _ansibled_target_keys
+        | reject('match', '^(ssh-[a-z0-9-]+|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+/]+=*( .*)?$')
+        | list | length == 0
+      - ansibled_target_from | select('search', '[\s",]') | list | length == 0
+    fail_msg: >-
+      ansibled_target_public_key must hold OpenSSH public keys without options
+      (e.g. "ssh-ed25519 AAAA... comment"), and ansibled_target_from entries must
+      not contain spaces, quotes or commas.
+    quiet: true
+
+# The account must be local so logins keep working when the directory service
+# is down. A directory user with the same name would shadow it.
+- name: Look up the user in all name services
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ansibled_target_user }}"
+    fail_key: false
+  register: _ansibled_target_getent_all
+
+- name: Look up the user in /etc/passwd
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ansibled_target_user }}"
+    service: files
+    fail_key: false
+  register: _ansibled_target_getent_files
+
+- name: Check that the user is not a directory-service account
+  ansible.builtin.assert:
+    that: >-
+      (_ansibled_target_getent_all.ansible_facts.getent_passwd[ansibled_target_user] | default(none)) is none
+      or (_ansibled_target_getent_files.ansible_facts.getent_passwd[ansibled_target_user] | default(none)) is not none
+    fail_msg: >-
+      "{{ ansibled_target_user }}" exists in a directory service but not in /etc/passwd.
+      Pick another ansibled_target_user (and ansible.remote_user in the ansibled config).
+    quiet: true
+
+# Only touch the package manager when sudo is missing (keeps check mode free of
+# package-manager requirements such as python3-apt).
+- name: Check whether sudo is installed
+  ansible.builtin.stat:
+    path: /usr/sbin/visudo
+  register: _ansibled_target_visudo
+
+- name: Install sudo
+  ansible.builtin.package:
+    name: sudo
+    state: present
+  when: not _ansibled_target_visudo.stat.exists
+
+- name: Create the ansibled group
+  ansible.builtin.group:
+    name: "{{ ansibled_target_user }}"
+    system: true
+    state: present
+
+- name: Create the ansibled user
+  ansible.builtin.user:
+    name: "{{ ansibled_target_user }}"
+    group: "{{ ansibled_target_user }}"
+    comment: ansibled (Ansible dry runs)
+    system: true
+    home: "{{ ansibled_target_home }}"
+    create_home: true
+    shell: /bin/bash
+    password_lock: true
+    state: present
+
+- name: Create the home directory
+  ansible.builtin.file:
+    path: "{{ ansibled_target_home }}"
+    state: directory
+    owner: "{{ ansibled_target_user }}"
+    group: "{{ ansibled_target_user }}"
+    mode: "0700"
+
+- name: Create the .ssh directory
+  ansible.builtin.file:
+    path: "{{ ansibled_target_home }}/.ssh"
+    state: directory
+    owner: "{{ ansibled_target_user }}"
+    group: "{{ ansibled_target_user }}"
+    mode: "0700"
+  notify: ansibled_target restorecon
+
+# from= only: Ansible needs exec without a pty plus sftp/scp, so the
+# "restrict" family of options is not used.
+- name: Install the authorized keys (exclusively)
+  ansible.posix.authorized_key:
+    user: "{{ ansibled_target_user }}"
+    path: "{{ ansibled_target_home }}/.ssh/authorized_keys"
+    key: "{{ _ansibled_target_keys | join('\n') }}"
+    key_options: "{{ ('from=\"' ~ (ansibled_target_from | join(',')) ~ '\"') if ansibled_target_from | length > 0 else omit }}"
+    exclusive: true
+    manage_dir: false
+    state: present
+  notify: ansibled_target restorecon
+
+- name: Allow the user to become root without a password
+  ansible.builtin.copy:
+    dest: "{{ _ansibled_target_sudoers_file }}"
+    content: |
+      {{ _ansibled_target_managed_header }}
+      Defaults:{{ ansibled_target_user }} !requiretty
+      {{ ansibled_target_user }} ALL=(ALL) NOPASSWD: ALL
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: Label the .ssh directory for sshd (SELinux)
+  when:
+    - ansibled_target_manage_selinux | bool
+    - (ansible_facts.selinux.status | default('disabled')) == 'enabled'
+  block:
+    - name: Install the SELinux management tools
+      ansible.builtin.package:
+        name: policycoreutils-python-utils
+        state: present
+      register: _ansibled_target_selinux_pkg
+
+    - name: Add the ssh_home_t file context
+      community.general.sefcontext:
+        target: "{{ ansibled_target_home }}/.ssh(/.*)?"
+        setype: ssh_home_t
+        state: present
+      # In check mode the tools may not be installed yet.
+      when: not (ansible_check_mode and _ansibled_target_selinux_pkg is changed)
+      notify: ansibled_target restorecon

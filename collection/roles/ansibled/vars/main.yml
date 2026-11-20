@@ -1,0 +1,116 @@
+---
+# Role internals, not meant to be overridden.
+_ansibled_managed_header: "# Managed by Ansible (timothywashburn.ansibled.ansibled). Do not edit."
+
+# Container-side paths.
+_ansibled_c_etc: /etc/ansibled
+_ansibled_c_secrets: /etc/ansibled/secrets
+_ansibled_c_data: /var/lib/ansibled
+
+# Host-side paths.
+_ansibled_h_etc: "{{ ansibled_dir }}/etc"
+_ansibled_h_secrets: "{{ ansibled_dir }}/etc/secrets"
+_ansibled_h_overlay: "{{ ansibled_dir }}/etc/overlay"
+_ansibled_h_data: "{{ ansibled_dir }}/data"
+
+# Merged over ansibled_config, so users never write these.
+_ansibled_config_managed:
+  forge:
+    token_file: "{{ _ansibled_c_secrets }}/forge_token"
+    webhook_secret_file: "{{ _ansibled_c_secrets }}/webhook_secret"
+    oauth:
+      client_id_file: "{{ _ansibled_c_secrets }}/oauth_client_id"
+      client_secret_file: "{{ _ansibled_c_secrets }}/oauth_client_secret"
+  ansible:
+    ssh_key_file: "{{ _ansibled_c_secrets }}/ssh_key"
+  overlay_dir: "{{ _ansibled_c_etc }}/overlay"
+  data_dir: "{{ _ansibled_c_data }}"
+  web:
+    metrics_token_file: "{{ _ansibled_c_secrets }}/metrics_token"
+    session_key_file: "{{ _ansibled_c_secrets }}/session_key"
+
+_ansibled_config_effective: "{{ ansibled_config | combine(_ansibled_config_managed, recursive=True) }}"
+
+# Keys ansibled.yml accepts, per section (unknown keys are an error in ansibled).
+_ansibled_config_keys:
+  top: [site, public_url, listen, forge, repo, ansible, schedule, retention]
+  listen: [webhook, web]
+  forge: [type, url, project, trusted_group, clone_url]
+  repo: [workdir, setup, venv_key_files, collections_requirements]
+  ansible: [inventory, playbooks, extra_args, remote_user, timeout, env]
+  schedule: [nightly, timezone]
+
+# Secret files written from variables: name -> variable value (undefined = generate).
+_ansibled_required_secrets:
+  - {name: forge_token, var: ansibled_forge_token}
+  - {name: oauth_client_id, var: ansibled_oauth_client_id}
+  - {name: oauth_client_secret, var: ansibled_oauth_client_secret}
+_ansibled_optional_secrets:
+  - {name: webhook_secret, var: ansibled_webhook_secret}
+  - {name: metrics_token, var: ansibled_metrics_token}
+  - {name: session_key, var: ansibled_session_key}
+
+# host:port -> (host for the healthcheck, port). Wildcard binds are probed on loopback.
+_ansibled_webhook_host: "{{ ansibled_config.listen.webhook | regex_replace(':[0-9]+$', '') }}"
+_ansibled_webhook_port: "{{ ansibled_config.listen.webhook | regex_search('[0-9]+$') }}"
+_ansibled_web_port: "{{ ansibled_config.listen.web | regex_search('[0-9]+$') }}"
+_ansibled_health_host: >-
+  {{ '127.0.0.1' if _ansibled_webhook_host in ['', '0.0.0.0']
+     else '[::1]' if _ansibled_webhook_host in ['::', '[::]']
+     else _ansibled_webhook_host }}
+_ansibled_health_url: "http://{{ _ansibled_health_host }}:{{ _ansibled_webhook_port }}/healthz"
+
+_ansibled_compose:
+  name: "{{ ansibled_container_name }}"
+  services:
+    ansibled:
+      image: "{{ ansibled_image }}"
+      container_name: "{{ ansibled_container_name }}"
+      network_mode: host
+      restart: always
+      user: "{{ ansibled_uid }}:{{ ansibled_gid }}"
+      stop_grace_period: 60s
+      volumes:
+        - "{{ _ansibled_h_etc }}:{{ _ansibled_c_etc }}:ro,Z"
+        - "{{ _ansibled_h_data }}:{{ _ansibled_c_data }}:Z"
+      healthcheck:
+        # The image has no curl.
+        test:
+          - CMD
+          - python3
+          - -c
+          - "import urllib.request; urllib.request.urlopen('{{ _ansibled_health_url }}', timeout=5)"
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 30s
+
+# Computed lists. The templates emit JSON so the result is a list on every
+# ansible-core version (2.15 string conversion vs. 2.19 native types).
+_ansibled_unknown_keys_json: >-
+  {%- set ns = namespace(out=[]) -%}
+  {%- for k in ansibled_config if k not in _ansibled_config_keys.top -%}
+  {%-   set ns.out = ns.out + [k] -%}
+  {%- endfor -%}
+  {%- for section in ['listen', 'forge', 'repo', 'ansible', 'schedule'] -%}
+  {%-   if ansibled_config[section] is defined and ansibled_config[section] is mapping -%}
+  {%-     for k in ansibled_config[section] if k not in _ansibled_config_keys[section] -%}
+  {%-       set ns.out = ns.out + [section ~ '.' ~ k] -%}
+  {%-     endfor -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{- ns.out | to_json -}}
+_ansibled_unknown_keys: "{{ _ansibled_unknown_keys_json | from_json }}"
+
+_ansibled_overlay_paths: "{{ ansibled_overlay_files | map(attribute='path', default='') | list }}"
+# Every parent directory of an overlay file, relative to the overlay root.
+_ansibled_overlay_dirs_json: >-
+  {%- set ns = namespace(out=[]) -%}
+  {%- for p in _ansibled_overlay_paths -%}
+  {%-   set parts = p.split('/') -%}
+  {%-   for i in range(1, parts | length) -%}
+  {%-     set ns.out = ns.out + [parts[:i] | join('/')] -%}
+  {%-   endfor -%}
+  {%- endfor -%}
+  {{- ns.out | unique | sort | to_json -}}
+_ansibled_overlay_dirs: "{{ _ansibled_overlay_dirs_json | from_json }}"

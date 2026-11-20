@@ -1,0 +1,7 @@
+{{define "content" -}}
+<h1>{{.Title}}</h1>
+<p>{{.Message}}</p>
+{{- if .Link}}
+<p><a href="{{.Link}}">{{.LinkText}}</a></p>
+{{- end}}
+{{- end}}

@@ -1,0 +1,55 @@
+---
+# gitlab_hook cannot read the hook's secret back from GitLab and so reports a
+# change on every run. Only call it when the hook is missing, its settings
+# differ, or the webhook secret changed in this run.
+- name: Look up the project webhooks
+  ansible.builtin.uri:
+    url: >-
+      {{ ansibled_gitlab_api_url | regex_replace('/+$', '') }}/api/v4/projects/{{
+         ansibled_config.forge.project | string | urlencode | replace('/', '%2F') }}/hooks?per_page=100
+    headers:
+      PRIVATE-TOKEN: "{{ ansibled_gitlab_hook_token }}"
+    validate_certs: "{{ ansibled_gitlab_validate_certs }}"
+    return_content: true
+  register: _ansibled_hooks
+  check_mode: false
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Find the ansibled webhook
+  ansible.builtin.set_fact:
+    _ansibled_hook_current: >-
+      {{ _ansibled_hooks.json | selectattr('url', 'equalto', ansibled_gitlab_hook_url) | first | default({}) }}
+    _ansibled_hook_secret_changed: >-
+      {{ _ansibled_optional_secrets_result.results
+         | selectattr('item.name', 'equalto', 'webhook_secret') | selectattr('changed') | list | length > 0 }}
+
+- name: Ensure the project webhook
+  community.general.gitlab_hook:
+    api_url: "{{ ansibled_gitlab_api_url }}"
+    api_token: "{{ ansibled_gitlab_hook_token }}"
+    validate_certs: "{{ ansibled_gitlab_validate_certs }}"
+    project: "{{ ansibled_config.forge.project | string }}"
+    hook_url: "{{ ansibled_gitlab_hook_url }}"
+    push_events: true
+    merge_requests_events: true
+    note_events: true
+    tag_push_events: false
+    issues_events: false
+    job_events: false
+    pipeline_events: false
+    wiki_page_events: false
+    hook_validate_certs: "{{ ansibled_gitlab_hook_validate_certs }}"
+    token: "{{ ansibled_webhook_secret_effective }}"
+    state: present
+  delegate_to: localhost
+  become: false
+  when: >-
+    (_ansibled_hook_current | length == 0)
+    or (_ansibled_hook_secret_changed | bool)
+    or not (_ansibled_hook_current.push_events | default(false))
+    or not (_ansibled_hook_current.merge_requests_events | default(false))
+    or not (_ansibled_hook_current.note_events | default(false))
+    or (_ansibled_hook_current.tag_push_events | default(false))
+    or (_ansibled_hook_current.enable_ssl_verification | default(true)) != (ansibled_gitlab_hook_validate_certs | bool)

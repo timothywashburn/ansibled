@@ -1,0 +1,7 @@
+# Daemon first, then the targets with the daemon's public key: the usual layout
+# of a real deployment.
+- name: Deploy the daemon
+  ansible.builtin.import_playbook: daemon.yml
+
+- name: Prepare the targets
+  ansible.builtin.import_playbook: target.yml

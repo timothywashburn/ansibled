@@ -1,0 +1,203 @@
+# timothywashburn.ansibled.ansibled
+
+Runs the [ansibled](https://github.com/timothywashburn/ansibled) container on one
+host (one instance per site): renders the config, writes the secrets, generates the
+SSH key, writes the overlay and starts the container with Docker Compose.
+
+## Requirements
+
+On the daemon host:
+
+- Docker with the Compose v2 plugin (`docker compose`), or Podman (see below).
+- Python 3 for the Ansible modules, and `ssh-keygen` (or the Python `cryptography`
+  library) for the key pair.
+- `firewalld` only if `ansibled_manage_firewalld: true`.
+
+On the controller: the `community.docker`, `community.crypto`, `community.general`
+and `ansible.posix` collections (installed as dependencies of this collection), and
+`python-gitlab` if you use webhook registration.
+
+## Host layout
+
+```
+/opt/ansibled/compose.yml                                       root 0644
+/opt/ansibled/etc/            -> /etc/ansibled (read-only, :Z)  root:10001 0750
+/opt/ansibled/etc/ansibled.yml                                  root:10001 0640
+/opt/ansibled/etc/secrets/*   -> /etc/ansibled/secrets/*        10001 0400 (dir 0700)
+/opt/ansibled/etc/overlay/... -> /etc/ansibled/overlay/...      10001 (dirs 0700)
+/opt/ansibled/data/           -> /var/lib/ansibled (rw, :Z)     10001 0700
+```
+
+The container runs as `10001:10001` with host networking and `restart: always`,
+`stop_grace_period: 60s`, and a healthcheck (`python3` + `urllib`, the image has no
+curl) against `http://<listen.webhook>/healthz` (a wildcard bind is probed on
+loopback).
+
+## Variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ansibled_config` | **required** | ansibled.yml settings, see below |
+| `ansibled_image` | `ghcr.io/timothywashburn/ansibled:latest` | Container image |
+| `ansibled_pull` | `always` | `always`, `missing` or `never` |
+| `ansibled_container_name` | `ansibled-<site>` | Container name, also the Compose project name |
+| `ansibled_dir` | `/opt/ansibled` | Host directory |
+| `ansibled_uid` / `ansibled_gid` | `10001` | uid/gid the container runs as |
+| `ansibled_forge_token` | first deploy only | GitLab project access token (Developer; `api`, `read_repository`) |
+| `ansibled_oauth_client_id` | first deploy only | GitLab OAuth application id |
+| `ansibled_oauth_client_secret` | first deploy only | GitLab OAuth application secret |
+| `ansibled_webhook_secret` | generated | Webhook secret token |
+| `ansibled_metrics_token` | generated | Bearer token for `/metrics` |
+| `ansibled_session_key` | generated | Web session signing key |
+| `ansibled_ssh_key_comment` | `ansibled@<site>` | Comment of the generated SSH key |
+| `ansibled_overlay_files` | `[]` | List of `{path, content \| src, mode}` copied over every checkout |
+| `ansibled_overlay_prune` | `false` | Delete overlay files not in `ansibled_overlay_files` |
+| `ansibled_manage_firewalld` | `false` | Open both listen ports in firewalld |
+| `ansibled_firewalld_zone` | `public` | firewalld zone |
+| `ansibled_gitlab_hook_token` | undefined | Enables webhook registration (Maintainer, `api`) |
+| `ansibled_gitlab_hook_url` | `http://<listen.webhook>/webhook/gitlab` | URL GitLab posts to |
+| `ansibled_gitlab_api_url` | `<forge.url>` | GitLab base URL for the API |
+| `ansibled_gitlab_validate_certs` | `true` | Verify TLS when talking to the GitLab API |
+| `ansibled_gitlab_hook_validate_certs` | `true` | GitLab verifies the hook URL's TLS (https only) |
+
+### `ansibled_config`
+
+The keys of [ansibled.yml](../../../DESIGN.md#configuration) **without** the
+container paths. The role merges these over your dict, so you never write them
+(giving them anyway is an error):
+
+```yaml
+forge: {token_file, webhook_secret_file, oauth: {client_id_file, client_secret_file}}
+ansible: {ssh_key_file}
+overlay_dir, data_dir
+web: {metrics_token_file, session_key_file}
+```
+
+Required: `site`, `public_url`, `listen.webhook`, `listen.web`, `forge.url`,
+`forge.project`, `forge.trusted_group`, `repo.setup`, `repo.venv_key_files`,
+`ansible.inventory`, `ansible.playbooks`. Optional: `forge.type`,
+`forge.clone_url`, `repo.workdir`, `repo.collections_requirements`,
+`ansible.extra_args`, `ansible.remote_user`, `ansible.timeout`, `ansible.env`,
+`schedule.nightly`, `schedule.timezone`, `retention`. Unknown keys fail early
+(`meta/argument_specs.yml` and an assert), because ansibled rejects them too.
+
+## Secrets
+
+The repo that deploys ansibled is usually the repo ansibled dry-runs, and anyone
+who can read it can read its variables. **Do not commit the forge token, the OAuth
+secret or the webhook secret to it**: whoever knows the webhook secret can forge
+"a trusted user pushed X" webhooks and get code run as root on the site.
+
+- `ansibled_forge_token`, `ansibled_oauth_client_id`, `ansibled_oauth_client_secret`
+  are needed on the **first deploy only**, e.g. from a gitignored file:
+  `ansible-playbook site.yml -e @ansibled-secrets.yml`. On later runs, leave them
+  undefined and the files already on the host are kept. If one is undefined and its
+  file is missing, the role fails naming the variable (in check mode it only
+  prints a warning, so a dry run of a fresh host does not fail).
+- `ansibled_webhook_secret`, `ansibled_metrics_token`, `ansibled_session_key`: when
+  undefined, a random 48-character value is written the first time and kept
+  afterwards. Defining one later replaces the file.
+- Every task that handles a secret uses `no_log: true`.
+- Do **not** add the token's bot user to the trusted group (ansibled ignores the
+  bot as a trigger anyway). It only needs to be able to *see* the group's members.
+
+After the secrets are written, the role sets these facts (no_log) for later plays:
+
+| Fact | Content |
+|---|---|
+| `ansibled_public_key` | The daemon's SSH public key, for `ansibled_target` |
+| `ansibled_webhook_secret_effective` | The webhook secret on the host |
+| `ansibled_metrics_token_effective` | The metrics token on the host (e.g. for a Prometheus `credentials_file`) |
+
+## Restarts
+
+ansibled reads its config and secrets at startup, so a change to `ansibled.yml` or
+a secret restarts the container (handler; skipped when `docker compose up` already
+recreated it in the same run). A change of image or `compose.yml` recreates it.
+Overlay changes need no restart: ansibled copies the overlay into every checkout.
+Changing the SSH key comment needs no restart either.
+
+## Webhook registration
+
+With `ansibled_gitlab_hook_token` defined, the role makes sure the project has a hook
+at `ansibled_gitlab_hook_url` with push, merge request and comment (note) events and
+the effective webhook secret as its token. It runs on the controller
+(`delegate_to: localhost`, `become: false`) and needs `python-gitlab` there. It is
+not `run_once`: every daemon host in the play registers its own URL (one per site).
+
+GitLab never returns a hook's secret, so `community.general.gitlab_hook` would
+report a change on every run. The role therefore first lists the hooks (read-only,
+also in check mode) and only calls `gitlab_hook` when the hook is missing, its
+events or TLS setting differ, or the webhook secret changed in this run. Keep the
+hook token out of the repo as well.
+
+## Check mode
+
+The role supports `--check` (ansibled itself dry-runs repos that contain it). On a
+fresh host nothing exists yet, so the key pair, `docker compose` and the facts that
+depend on files on the host are skipped; on later runs a check run reports no
+changes.
+
+## Podman hosts
+
+This works on rootful Podman with `podman-docker` (the `docker` command, and the
+`/run/docker.sock` link to the Podman socket) plus the Docker Compose plugin talking
+to the Podman socket: `systemctl enable --now podman.socket`. Podman does not
+restart containers itself: containers with `restart: always` come back after a
+reboot through `podman-restart.service`, which must be enabled.
+
+## Example
+
+```yaml
+# requirements.yml
+collections:
+  - name: https://github.com/timothywashburn/ansibled.git#/collection
+    type: git
+    version: main
+```
+
+```yaml
+- name: ansibled daemon
+  hosts: ansibled
+  become: true
+  roles:
+    - role: timothywashburn.ansibled.ansibled
+      vars:
+        ansibled_config:
+          site: mysite
+          public_url: http://10.0.0.1:8471
+          listen:
+            webhook: 10.0.0.1:8470
+            web: 10.0.0.1:8471
+          forge:
+            url: https://gitlab.example.org
+            project: myorg/infra
+            trusted_group: myorg/sysadmins
+          repo:
+            workdir: ansible
+            setup: uv sync --frozen --no-dev
+            venv_key_files: [pyproject.toml, uv.lock]
+            collections_requirements: requirements.yml
+          ansible:
+            inventory: inventories/mysite
+            playbooks: [site.yml]
+            remote_user: ansibled
+          schedule:
+            nightly: "0 4 * * *"
+            timezone: America/Los_Angeles
+        ansibled_overlay_files:
+          - path: ansible/.vault-pass
+            content: "{{ lookup('ansible.builtin.file', '~/.ansibled-vault-pass') }}"
+            mode: "0400"
+        # ansibled_forge_token, ansibled_oauth_client_id/secret and (optionally)
+        # ansibled_gitlab_hook_token: first deploy only, -e @ansibled-secrets.yml
+
+- name: Hosts ansibled manages
+  hosts: all
+  become: true
+  roles:
+    - role: timothywashburn.ansibled.ansibled_target
+      vars:
+        ansibled_target_public_key: "{{ hostvars[groups['ansibled'][0]].ansibled_public_key }}"
+        ansibled_target_from: [10.0.0.1]
+```

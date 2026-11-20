@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+**/__pycache__
+**/*.pyc
+**/.venv
+collection
+docs
+testdata
+examples
+ignore-*
+*.db

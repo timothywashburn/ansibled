@@ -1,0 +1,44 @@
+---
+# ansibled copies the overlay over every checkout, so changes here need no restart.
+- name: Create the overlay directories
+  ansible.builtin.file:
+    path: "{{ _ansibled_h_overlay }}/{{ item }}"
+    state: directory
+    owner: "{{ ansibled_uid }}"
+    group: "{{ ansibled_gid }}"
+    mode: "0700"
+  loop: "{{ _ansibled_overlay_dirs }}"
+
+- name: Write the overlay files
+  ansible.builtin.copy:
+    dest: "{{ _ansibled_h_overlay }}/{{ item.path }}"
+    content: "{{ item.content | default(omit) }}"
+    src: "{{ item.src | default(omit) }}"
+    owner: "{{ ansibled_uid }}"
+    group: "{{ ansibled_gid }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop: "{{ ansibled_overlay_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  no_log: true
+
+- name: Prune the overlay
+  when: ansibled_overlay_prune | bool
+  block:
+    - name: Find files in the overlay
+      ansible.builtin.find:
+        paths: "{{ _ansibled_h_overlay }}"
+        recurse: true
+        hidden: true
+        file_type: any
+      register: _ansibled_overlay_found
+
+    - name: Remove overlay files that are not in ansibled_overlay_files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ _ansibled_overlay_found.files | map(attribute='path')
+           | reject('in', (_ansibled_overlay_paths + _ansibled_overlay_dirs)
+                          | map('regex_replace', '^', _ansibled_h_overlay ~ '/') | list)
+           | sort | list }}

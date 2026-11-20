@@ -1,0 +1,15 @@
+# Applies ansibled_target to the target containers.
+# Extra vars:
+#   test_pubkey  key(s) to authorize (default: ansibled_public_key from the daemon
+#                host, when this playbook runs after daemon.yml as in site.yml)
+#   test_from    list for ansibled_target_from (default [])
+#   test_state   present | absent (default present)
+- name: Prepare managed hosts
+  hosts: targets
+  gather_facts: false
+  roles:
+    - role: timothywashburn.ansibled.ansibled_target
+      vars:
+        ansibled_target_public_key: "{{ test_pubkey | default(hostvars[groups['daemon'][0]].ansibled_public_key) }}"
+        ansibled_target_from: "{{ test_from | default([]) }}"
+        ansibled_target_state: "{{ test_state | default('present') }}"

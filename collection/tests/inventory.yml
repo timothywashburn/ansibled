@@ -1,0 +1,18 @@
+# Test inventory: Docker containers created by run.sh (all named ansibled-roles-test-*).
+all:
+  vars:
+    ansible_connection: community.docker.docker
+  children:
+    targets:
+      hosts:
+        ansibled-roles-test-rocky9: {}
+        ansibled-roles-test-trixie: {}
+    daemon:
+      hosts:
+        ansibled-roles-test-dind:
+          ansible_python_interpreter: /usr/bin/python3
+    controller:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"

@@ -1,0 +1,4 @@
+---
+# Role internals, not meant to be overridden.
+_ansibled_target_sudoers_file: /etc/sudoers.d/ansibled
+_ansibled_target_managed_header: "# Managed by Ansible (timothywashburn.ansibled.ansibled_target). Do not edit."

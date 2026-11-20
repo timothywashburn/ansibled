@@ -1,0 +1,78 @@
+{
+  "object_kind": "note",
+  "event_type": "note",
+  "user": {
+    "id": 42,
+    "name": "Alice Admin",
+    "username": "alice",
+    "avatar_url": "https://gitlab.example.org/uploads/-/system/user/avatar/42/avatar.png",
+    "email": "[REDACTED]"
+  },
+  "project_id": 17,
+  "project": {
+    "id": 17,
+    "name": "infra",
+    "description": "Infrastructure as code",
+    "web_url": "https://gitlab.example.org/myorg/infra",
+    "avatar_url": null,
+    "git_ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "git_http_url": "https://gitlab.example.org/myorg/infra.git",
+    "namespace": "myorg",
+    "visibility_level": 0,
+    "path_with_namespace": "myorg/infra",
+    "default_branch": "main",
+    "ci_config_path": "",
+    "homepage": "https://gitlab.example.org/myorg/infra",
+    "url": "git@gitlab.example.org:myorg/infra.git",
+    "ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "http_url": "https://gitlab.example.org/myorg/infra.git"
+  },
+  "object_attributes": {
+    "attachment": null,
+    "author_id": 42,
+    "change_position": null,
+    "commit_id": "9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+    "created_at": "2026-11-18 22:01:40 UTC",
+    "discussion_id": "6a1f0b5c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
+    "id": 88124,
+    "line_code": null,
+    "note": "/ansibled check",
+    "noteable_id": null,
+    "noteable_type": "Commit",
+    "original_position": null,
+    "position": null,
+    "project_id": 17,
+    "resolved_at": null,
+    "resolved_by_id": null,
+    "resolved_by_push": null,
+    "st_diff": null,
+    "system": false,
+    "type": null,
+    "updated_at": "2026-11-18 22:01:40 UTC",
+    "updated_by_id": null,
+    "description": "/ansibled check",
+    "url": "https://gitlab.example.org/myorg/infra/-/commit/9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4#note_88124",
+    "action": "create",
+    "internal": false
+  },
+  "repository": {
+    "name": "infra",
+    "url": "git@gitlab.example.org:myorg/infra.git",
+    "description": "Infrastructure as code",
+    "homepage": "https://gitlab.example.org/myorg/infra",
+    "git_http_url": "https://gitlab.example.org/myorg/infra.git",
+    "git_ssh_url": "git@gitlab.example.org:myorg/infra.git",
+    "visibility_level": 0
+  },
+  "commit": {
+    "id": "9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+    "message": "network: add vlan 42 to compute nodes\n",
+    "title": "network: add vlan 42 to compute nodes",
+    "timestamp": "2026-11-18T21:14:03+00:00",
+    "url": "https://gitlab.example.org/myorg/infra/-/commit/9f2c1e5b7d3a4c8e0f1a2b3c4d5e6f708192a3b4",
+    "author": {
+      "name": "Bob Builder",
+      "email": "bob@example.org"
+    }
+  }
+}

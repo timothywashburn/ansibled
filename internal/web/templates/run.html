@@ -1,0 +1,78 @@
+{{define "content" -}}
+{{- with .Run}}
+<h1>Run {{.ID}} · <span class="state-{{.State}}">{{.State}}</span></h1>
+<dl>
+  <dt>kind</dt><dd>{{.Kind}}{{if .MR}} {{.MR}}{{end}}</dd>
+  <dt>ref</dt><dd>{{.Ref}}</dd>
+  <dt>commit</dt><dd><code>{{.FullSHA}}</code></dd>
+  <dt>trigger</dt><dd>{{.Trigger}}{{if .By}} by {{.By}}{{end}}</dd>
+  <dt>description</dt><dd>{{.Description}}</dd>
+  <dt>queued</dt><dd>{{.Queued}}</dd>
+  {{- if .Started}}<dt>started</dt><dd>{{.Started}}</dd>{{end}}
+  {{- if .Finished}}<dt>finished</dt><dd>{{.Finished}}</dd>{{end}}
+  {{- if .Duration}}<dt>duration</dt><dd>{{.Duration}}</dd>{{end}}
+</dl>
+{{- end}}
+
+{{- with .Summary}}
+{{- if .FailedStep}}
+<h2>Error</h2>
+<p>Failed step: <strong>{{.FailedStep}}</strong></p>
+{{- if .Error}}<pre>{{.Error}}</pre>{{end}}
+{{- end}}
+{{- range .Playbooks}}
+<h2>{{.Playbook}} <span class="muted">· exit code {{.ExitCode}}</span></h2>
+{{- if .Hosts}}
+<div class="scroll">
+<table>
+<thead><tr>
+  <th>host</th><th class="num">ok</th><th class="num">would change</th><th class="num">failed</th>
+  <th>unreachable</th><th class="num">skipped</th><th class="num">ignored</th><th class="num">rescued</th>
+</tr></thead>
+<tbody>
+{{- range .Hosts}}
+<tr>
+  <td>{{.Host}}</td>
+  <td class="num">{{.OK}}</td>
+  <td class="num">{{.Changed}}</td>
+  <td class="num{{if .Failed}} state-failed{{end}}">{{.Failed}}</td>
+  <td{{if .Unreachable}} class="state-failed"{{end}}>{{if .Unreachable}}yes{{end}}</td>
+  <td class="num">{{.Skipped}}</td>
+  <td class="num">{{.Ignored}}</td>
+  <td class="num">{{.Rescued}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- range .Hosts}}
+{{- if .ChangedTasks}}
+<h3>{{.Host}}: would change</h3>
+<ul>{{range .ChangedTasks}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+{{- if .FailedTasks}}
+<h3 class="state-failed">{{.Host}}: failed</h3>
+<ul>{{range .FailedTasks}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+{{- end}}
+{{- else}}
+<p class="muted">No hosts.</p>
+{{- end}}
+{{- end}}
+{{- end}}
+
+<h2>Log</h2>
+{{- with .Log}}
+{{- if .Expired}}
+<p class="muted">log expired</p>
+{{- else if .Missing}}
+<p class="muted">No log yet.</p>
+{{- else}}
+<p class="muted">{{.Size}} · <a href="/runs/{{$.Run.ID}}/log.txt">raw log</a></p>
+{{- if .Truncated}}
+<p class="note">The log is larger than {{.Shown}}; showing only its end. See the <a href="/runs/{{$.Run.ID}}/log.txt">raw log</a> for all of it.</p>
+{{- end}}
+<pre>{{.Text}}</pre>
+{{- end}}
+{{- end}}
+{{- end}}

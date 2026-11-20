@@ -1,0 +1,12 @@
+---
+# ansibled reads its config and secrets at startup. Skipped when the container
+# was just (re)created by docker compose in this run.
+- name: Restart ansibled
+  community.docker.docker_compose_v2:
+    project_src: "{{ ansibled_dir }}"
+    state: restarted
+  when:
+    - _ansibled_compose_up is defined
+    - _ansibled_compose_up is not skipped
+    - _ansibled_compose_up is not changed
+  listen: ansibled restart

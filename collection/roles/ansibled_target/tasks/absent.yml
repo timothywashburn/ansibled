@@ -1,0 +1,31 @@
+---
+- name: Remove the sudoers file
+  ansible.builtin.file:
+    path: "{{ _ansibled_target_sudoers_file }}"
+    state: absent
+
+- name: Remove the ansibled user and its home
+  ansible.builtin.user:
+    name: "{{ ansibled_target_user }}"
+    state: absent
+    remove: true
+    force: true
+
+- name: Remove the ansibled group
+  ansible.builtin.group:
+    name: "{{ ansibled_target_user }}"
+    state: absent
+
+- name: Remove anything left in the home directory
+  ansible.builtin.file:
+    path: "{{ ansibled_target_home }}"
+    state: absent
+
+- name: Remove the ssh_home_t file context (SELinux)
+  community.general.sefcontext:
+    target: "{{ ansibled_target_home }}/.ssh(/.*)?"
+    setype: ssh_home_t
+    state: absent
+  when:
+    - ansibled_target_manage_selinux | bool
+    - (ansible_facts.selinux.status | default('disabled')) == 'enabled'

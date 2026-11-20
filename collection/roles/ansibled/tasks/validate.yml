@@ -1,0 +1,75 @@
+---
+- name: Check ansibled_config
+  ansible.builtin.assert:
+    that:
+      - ansibled_config.site is defined
+      - ansibled_config.site is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$')
+      - ansibled_config.public_url is defined and ansibled_config.public_url is match('^https?://[^/]+')
+      - ansibled_config.listen.webhook is defined and ansibled_config.listen.webhook is match('^.+:[0-9]+$')
+      - ansibled_config.listen.web is defined and ansibled_config.listen.web is match('^.+:[0-9]+$')
+      - ansibled_config.forge.url is defined and ansibled_config.forge.url is match('^https?://[^/]+')
+      - ansibled_config.forge.project is defined and ansibled_config.forge.project | string | length > 0
+      - ansibled_config.forge.trusted_group is defined and ansibled_config.forge.trusted_group | length > 0
+      - ansibled_config.repo.setup is defined and ansibled_config.repo.setup | trim | length > 0
+      - ansibled_config.repo.venv_key_files is defined and ansibled_config.repo.venv_key_files | length > 0
+      - ansibled_config.ansible.inventory is defined and ansibled_config.ansible.inventory | length > 0
+      - ansibled_config.ansible.playbooks is defined and ansibled_config.ansible.playbooks | length > 0
+      - _ansibled_unknown_keys | length == 0
+    fail_msg: >-
+      ansibled_config needs site, public_url, listen.webhook, listen.web (host:port),
+      forge.url, forge.project, forge.trusted_group, repo.setup, repo.venv_key_files,
+      ansible.inventory and ansible.playbooks.
+      {% if _ansibled_unknown_keys | length > 0 %}Unknown or role-managed keys: {{ _ansibled_unknown_keys | join(', ') }}.{% endif %}
+    quiet: true
+
+# One assert over derived lists, so a failure never prints file contents.
+- name: Check ansibled_overlay_files
+  ansible.builtin.assert:
+    that:
+      - _ansibled_overlay_paths | reject('match', '^[^/]+(/[^/]+)*$') | list | length == 0
+      - _ansibled_overlay_paths | select('search', '(^|/)\.\.?(/|$)') | list | length == 0
+      - _ansibled_overlay_paths | unique | list | length == _ansibled_overlay_paths | length
+      - ansibled_overlay_files | selectattr('content', 'defined') | selectattr('src', 'defined') | list | length == 0
+      - ansibled_overlay_files | rejectattr('content', 'defined') | rejectattr('src', 'defined') | list | length == 0
+    fail_msg: >-
+      Every ansibled_overlay_files entry needs a unique, relative "path" that stays
+      inside the repo (no leading /, no . or .. components) and exactly one of
+      "content" or "src". Paths: {{ _ansibled_overlay_paths | join(', ') }}
+    quiet: true
+
+# The forge token and OAuth credentials only have to be given on the first
+# deploy: afterwards the files on the host are kept when the variables are
+# undefined, so the deploying repo (which ansibled dry-runs) never holds them.
+- name: Check which required secret files exist
+  ansible.builtin.stat:
+    path: "{{ _ansibled_h_secrets }}/{{ item.name }}"
+  loop: "{{ _ansibled_required_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _ansibled_required_stat
+
+- name: Fail when a required secret is neither given nor on the host
+  ansible.builtin.fail:
+    msg: >-
+      {{ item.item.var }} is undefined and {{ item.stat.path | default(_ansibled_h_secrets ~ '/' ~ item.item.name) }}
+      does not exist yet. Pass it on the first deploy (e.g. -e @secrets.yml).
+  loop: "{{ _ansibled_required_stat.results }}"
+  loop_control:
+    label: "{{ item.item.var }}"
+  when:
+    - not ansible_check_mode
+    - not item.stat.exists
+    - lookup('ansible.builtin.vars', item.item.var, default='') | length == 0
+
+- name: Warn when a required secret is neither given nor on the host (check mode)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ item.item.var }} is undefined and {{ _ansibled_h_secrets }}/{{ item.item.name }}
+      does not exist yet; a real run would fail.
+  loop: "{{ _ansibled_required_stat.results }}"
+  loop_control:
+    label: "{{ item.item.var }}"
+  when:
+    - ansible_check_mode
+    - not item.stat.exists
+    - lookup('ansible.builtin.vars', item.item.var, default='') | length == 0

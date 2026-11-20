@@ -1,0 +1,9 @@
+---
+# The target's address comes from the environment so tests can point it at a
+# throwaway sshd container (see internal/engine/integration_test.go).
+all:
+  hosts:
+    target:
+      ansible_host: "{{ lookup('ansible.builtin.env', 'SAMPLE_TARGET_HOST', default='127.0.0.1') }}"
+      ansible_port: "{{ lookup('ansible.builtin.env', 'SAMPLE_TARGET_PORT', default='22') }}"
+      ansible_python_interpreter: /usr/bin/python3

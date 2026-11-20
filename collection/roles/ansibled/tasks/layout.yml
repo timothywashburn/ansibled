@@ -1,0 +1,16 @@
+---
+- name: Create the ansibled directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ ansibled_dir }}", owner: 0, group: 0, mode: "0755"}
+    - {path: "{{ _ansibled_h_etc }}", owner: 0, group: "{{ ansibled_gid }}", mode: "0750"}
+    - {path: "{{ _ansibled_h_secrets }}", owner: "{{ ansibled_uid }}", group: "{{ ansibled_gid }}", mode: "0700"}
+    - {path: "{{ _ansibled_h_overlay }}", owner: "{{ ansibled_uid }}", group: "{{ ansibled_gid }}", mode: "0700"}
+    - {path: "{{ _ansibled_h_data }}", owner: "{{ ansibled_uid }}", group: "{{ ansibled_gid }}", mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+{{- if .Refresh}}
+<meta http-equiv="refresh" content="5">
+{{- end}}
+<title>{{.Title}} · ansibled · {{.Site}}</title>
+<style>
+:root { color-scheme: light dark; --bg: #fff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --code: #f6f8fa;
+  --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; --link: #0969da; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --code: #161b22;
+    --ok: #3fb950; --bad: #f85149; --warn: #d29922; --link: #4493f8; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+header { display: flex; gap: 1rem; align-items: baseline; padding: .6rem 1rem; border-bottom: 1px solid var(--line); }
+header .site { font-weight: 600; }
+header .user { margin-left: auto; color: var(--muted); }
+main { padding: 1rem; max-width: 100%; }
+h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
+table { border-collapse: collapse; margin-bottom: 1rem; }
+th, td { border-bottom: 1px solid var(--line); padding: .3rem .6rem; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+code, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+pre { background: var(--code); border: 1px solid var(--line); padding: .75rem; overflow-x: auto; white-space: pre; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; margin: 0 0 1rem; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+.muted { color: var(--muted); }
+.note { color: var(--warn); }
+.state-success { color: var(--ok); }
+.state-failed, .state-error { color: var(--bad); }
+.state-queued, .state-running, .state-canceled { color: var(--muted); }
+nav.pager { display: flex; gap: 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <span class="site">ansibled · {{.Site}}</span>
+  {{- if .User}}
+  <a href="/runs">runs</a>
+  <span class="user">{{.User}} · <a href="/logout">sign out</a></span>
+  {{- end}}
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
