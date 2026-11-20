@@ -229,7 +229,7 @@ func (s *suite) setup() {
 
 	docker(t, slices.Concat(
 		[]string{"run", "-d", "--name", daemonName, "--network", networkName,
-			"-p", fmt.Sprintf("127.0.0.1:%d:8470", hookPort), "-p", fmt.Sprintf("127.0.0.1:%d:8471", webPort),
+			"-p", fmt.Sprintf("127.0.0.1:%d:9250", hookPort), "-p", fmt.Sprintf("127.0.0.1:%d:9251", webPort),
 			"-v", dataVolume + ":/var/lib/ansibled"},
 		s.runArgs, []string{daemonImage, "serve"})...)
 	t.Cleanup(s.diagnostics) // runs before the container is removed
@@ -240,8 +240,8 @@ func (s *suite) configYAML() string {
 	return fmt.Sprintf(`site: %s
 public_url: %s
 listen:
-  webhook: 0.0.0.0:8470
-  web: 0.0.0.0:8471
+  webhook: 0.0.0.0:9250
+  web: 0.0.0.0:9251
 git:
   type: gitlab
   url: %s

@@ -15,8 +15,12 @@ ansibled_target_home: /var/lib/ansibled
 # ansibled_target_controller: ansible-controller
 # or give the key itself (several keys: one per line), which takes precedence:
 # ansibled_target_public_key: "ssh-ed25519 AAAA... ansibled"
-# The ansibled_dir used on the controller.
-ansibled_target_controller_dir: /opt/ansibled
+# The ansibled_dir used on the controller: its ansibled_dir from the
+# inventory when set there, else the ansibled role's default.
+ansibled_target_controller_dir: >-
+  {{ hostvars[ansibled_target_controller].ansibled_dir | default('/opt/ansibled')
+     if ansibled_target_controller | default('') | length > 0 and ansibled_target_controller in hostvars
+     else '/opt/ansibled' }}
 
 # Addresses/CIDRs/patterns the key may be used from (sshd "from=" option).
 # Empty: no restriction.

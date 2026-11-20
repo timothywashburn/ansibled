@@ -26,10 +26,10 @@
         ansibled_config: "{{ _test_config | combine(test_secrets | default({}), recursive=True) }}"
         _test_config:
           site: testsite
-          public_url: http://127.0.0.1:8471
+          public_url: http://127.0.0.1:9251
           listen:
-            webhook: 127.0.0.1:8470
-            web: 127.0.0.1:8471
+            webhook: 127.0.0.1:9250
+            web: 127.0.0.1:9251
           git:
             url: https://gitlab.example.org
             project: myorg/infra

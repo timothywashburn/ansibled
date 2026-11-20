@@ -23,7 +23,7 @@ Supported: EL 8/9/10 and Debian 12/13. Supports check mode.
 | Variable | Default | Meaning |
 |---|---|---|
 | `ansibled_target_controller` | unset | Inventory hostname of the host running the ansibled daemon; its key is read from there. One of this and `ansibled_target_public_key` is required for `present` |
-| `ansibled_target_controller_dir` | `/opt/ansibled` | The `ansibled_dir` used on the controller |
+| `ansibled_target_controller_dir` | the controller's `ansibled_dir`, else `/opt/ansibled` | The `ansibled_dir` used on the controller |
 | `ansibled_target_public_key` | unset | The daemon's SSH public key; when set it is used as is and the controller is not contacted |
 | `ansibled_target_from` | `[]` | Addresses/CIDRs/patterns the key may be used from |
 | `ansibled_target_user` | `ansibled` | Local user name (match `ansible.remote_user` in the ansibled config) |

@@ -100,8 +100,8 @@ func TestCheckConfigOnline(t *testing.T) {
 	cfg := filepath.Join(dir, "ansibled.yml")
 	writeCfg := func(issuer string) {
 		y := fmt.Sprintf(`site: lab
-public_url: http://10.0.0.1:8471
-listen: {webhook: "10.0.0.1:8470", web: "10.0.0.1:8471"}
+public_url: http://10.0.0.1:9251
+listen: {webhook: "10.0.0.1:9250", web: "10.0.0.1:9251"}
 git:
   url: %s
   project: myorg/infra

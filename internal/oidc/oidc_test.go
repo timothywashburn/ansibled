@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	redirect = "http://ansibled.example:8471/oauth/callback"
+	redirect = "http://ansibled.example:9251/oauth/callback"
 	verifier = "verifier-0123456789-0123456789-0123456789-abc"
 )
 

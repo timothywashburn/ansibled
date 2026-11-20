@@ -33,8 +33,9 @@ argument_specs:
           - One of this and O(ansibled_target_public_key) is required when O(ansibled_target_state=present).
       ansibled_target_controller_dir:
         type: path
-        default: /opt/ansibled
-        description: The C(ansibled_dir) used by the ansibled role on O(ansibled_target_controller).
+        description:
+          - The C(ansibled_dir) used by the ansibled role on O(ansibled_target_controller).
+          - Defaults to that host's C(ansibled_dir) from the inventory, else C(/opt/ansibled).
       ansibled_target_public_key:
         type: str
         description:

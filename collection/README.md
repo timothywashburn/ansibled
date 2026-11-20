@@ -40,8 +40,8 @@ This also installs the dependencies `community.docker`, `community.general`,
       vars:
         ansibled_config:
           site: mysite
-          public_url: http://10.0.0.1:8471
-          listen: {webhook: "10.0.0.1:8470", web: "10.0.0.1:8471"}
+          public_url: http://10.0.0.1:9251
+          listen: {webhook: "10.0.0.1:9250", web: "10.0.0.1:9251"}
           git: {url: https://gitlab.example.org, project: myorg/infra, trusted_group: myorg/sysadmins, token: "{{ vault_git_token }}"}
           repo: {setup: uv sync --frozen --no-dev, venv_key_files: [pyproject.toml, uv.lock]}
           ansible: {inventory: inventories/mysite, playbooks: [site.yml], remote_user: ansibled}

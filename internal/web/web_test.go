@@ -141,7 +141,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 	}
 	o := Options{
 		Config: &config.Config{
-			Site: "lab", PublicURL: "http://ansibled.example:8471",
+			Site: "lab", PublicURL: "http://ansibled.example:9251",
 			Listen:   config.Listen{Webhook: "127.0.0.1:0", Web: "127.0.0.1:0"},
 			Git:      config.Git{TrustedGroup: "example/admins"},
 			Schedule: config.Schedule{Timezone: "UTC"},
@@ -340,7 +340,7 @@ func TestLoginSuccess(t *testing.T) {
 	if len(q.Get("state")) != 43 || len(q.Get("code_challenge_src")) != 43 {
 		t.Errorf("state/verifier not 32 random bytes base64url: %v", q)
 	}
-	if q.Get("redirect_uri") != "http://ansibled.example:8471/oauth/callback" {
+	if q.Get("redirect_uri") != "http://ansibled.example:9251/oauth/callback" {
 		t.Errorf("redirect_uri = %q", q.Get("redirect_uri"))
 	}
 	res := e.do(t, "GET", "/oauth/callback?code=c0de&state="+url.QueryEscape(q.Get("state")), nil, nil, oc)

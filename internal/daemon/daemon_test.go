@@ -96,7 +96,7 @@ func newFixture(t *testing.T, gate bool) *fixture {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	cfg := &config.Config{Site: "test", PublicURL: "http://10.0.0.1:8471"}
+	cfg := &config.Config{Site: "test", PublicURL: "http://10.0.0.1:9251"}
 	cfg.Retention.Duration = time.Hour
 	log := slog.New(slog.DiscardHandler)
 	runner := &fakeRunner{}

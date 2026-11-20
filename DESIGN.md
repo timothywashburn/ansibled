@@ -236,7 +236,7 @@ task names:
 ```markdown
 <!-- ansibled:site=mysite -->
 ### ✅ ansibled · mysite · dry run passed
-`a1b2c3d` · 3m12s · [full log](http://10.0.0.1:8471/runs/412)
+`a1b2c3d` · 3m12s · [full log](http://10.0.0.1:9251/runs/412)
 
 | host | would change | failed | unreachable |
 |---|---:|---:|:-:|
@@ -377,7 +377,7 @@ a userinfo endpoint and a groups claim works. With **authentik** as the example:
 1. *Applications → Providers → Create → OAuth2/OpenID Provider*:
    - client type **Confidential**;
    - redirect URI (strict) `<public_url>/oauth/callback`, e.g.
-     `http://10.0.0.1:8471/oauth/callback`;
+     `http://10.0.0.1:9251/oauth/callback`;
    - scopes: the default `openid`, `profile` and `email` mappings. authentik's
      default *profile* scope mapping already puts the user's group names into a
      `groups` claim, so `web.oidc.groups_claim` can stay at its default.
@@ -402,11 +402,11 @@ referenced by file path. Unknown keys are an error.
 
 ```yaml
 site: mysite                       # status name ansibled/<site>, comment marker
-public_url: http://10.0.0.1:8471    # base for links and the sign-in redirect (<public_url>/oauth/callback)
+public_url: http://10.0.0.1:9251    # base for links and the sign-in redirect (<public_url>/oauth/callback)
 
 listen:
-  webhook: 10.0.0.1:8470
-  web: 10.0.0.1:8471
+  webhook: 10.0.0.1:9250
+  web: 10.0.0.1:9251
 
 git:
   type: gitlab

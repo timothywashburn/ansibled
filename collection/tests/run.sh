@@ -315,7 +315,7 @@ import json, sys
 log = json.load(sys.stdin)
 c = log[0]["body"]
 assert log[0]["op"] == "create", log
-assert c["url"] == "http://127.0.0.1:8470/webhook/gitlab", c
+assert c["url"] == "http://127.0.0.1:9250/webhook/gitlab", c
 assert c["push_events"] and c["merge_requests_events"] and c["note_events"], c
 assert not c["tag_push_events"] and not c["issues_events"], c
 print(c["token"])' >"$WORK/hook_token" || fail "hook payload"

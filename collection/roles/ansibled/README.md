@@ -173,10 +173,10 @@ collections:
       vars:
         ansibled_config:
           site: mysite
-          public_url: http://10.0.0.1:8471
+          public_url: http://10.0.0.1:9251
           listen:
-            webhook: 10.0.0.1:8470
-            web: 10.0.0.1:8471
+            webhook: 10.0.0.1:9250
+            web: 10.0.0.1:9251
           git:
             url: https://gitlab.example.org
             project: myorg/infra

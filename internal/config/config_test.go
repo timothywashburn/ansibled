@@ -11,10 +11,10 @@ import (
 
 const valid = `
 site: mysite
-public_url: http://10.0.0.1:8471/
+public_url: http://10.0.0.1:9251/
 listen:
-  webhook: 10.0.0.1:8470
-  web: 10.0.0.1:8471
+  webhook: 10.0.0.1:9250
+  web: 10.0.0.1:9251
 git:
   url: https://gitlab.example.org/
   project: myorg/infra
@@ -52,10 +52,10 @@ func TestParseValidAndDefaults(t *testing.T) {
 	if c.Ansible.Timeout.Duration != 45*time.Minute || c.Retention.Duration != 720*time.Hour {
 		t.Errorf("duration defaults: %v %v", c.Ansible.Timeout, c.Retention)
 	}
-	if c.PublicURL != "http://10.0.0.1:8471" || c.Git.URL != "https://gitlab.example.org" {
+	if c.PublicURL != "http://10.0.0.1:9251" || c.Git.URL != "https://gitlab.example.org" {
 		t.Errorf("trailing slashes not trimmed: %q %q", c.PublicURL, c.Git.URL)
 	}
-	if got := c.RunURL(7); got != "http://10.0.0.1:8471/runs/7" {
+	if got := c.RunURL(7); got != "http://10.0.0.1:9251/runs/7" {
 		t.Errorf("RunURL = %q", got)
 	}
 	if c.StatusName() != "ansibled/mysite" || c.CommentMarker() != "<!-- ansibled:site=mysite -->" {
